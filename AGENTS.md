@@ -65,3 +65,43 @@ Use this guide for structure, commands, and contribution practices.
 - 1RM estimate by Epley: 1RM = w * (1 + reps/30).
 - RIR optional; if missing, assume RIR=2 for HYP, RIR=1 for STR.
 - Phase switches logged in phase_states.
+# Repository Guidelines
+
+This repository contains the UltimateCoach iOS app built with SwiftUI and SwiftData. Use this guide for structure, commands, and contribution practices.
+
+## Project Structure & Module Organization
+- Xcode project: `UltimateCoach/UltimateCoach.xcodeproj`
+- App code: `UltimateCoach/UltimateCoach/`
+  - `App/` (App entry + ModelContainer)
+  - `Models/` (SwiftData @Model types)
+  - `Engine/` (pure functions, deterministic logic + tests)
+  - `Persistence/` (seed, export/import)
+  - `Features/Today|Logger|Progress|Settings|Onboarding/` (SwiftUI views)
+  - `Resources/` (seed JSON, assets)
+  - Tests: `UltimateCoach/UltimateCoachTests/`
+
+## Build, Test, and Development Commands
+- Open in Xcode: `open UltimateCoach/UltimateCoach.xcodeproj`
+- Build (sim): `xcodebuild -project UltimateCoach/UltimateCoach.xcodeproj -scheme UltimateCoach -destination 'platform=iOS Simulator,name=iPhone 15' build`
+- Tests: `xcodebuild -project UltimateCoach/UltimateCoach.xcodeproj -scheme UltimateCoach -destination 'platform=iOS Simulator,name=iPhone 15' test`
+- First run shows a start-date setup; Today then loads Week 1 · Day 1.
+
+## Coding Style & Naming Conventions
+- Swift, 4-space indentation; keep lines ~120 chars.
+- Types: UpperCamelCase; methods/vars: lowerCamelCase; file name matches primary type.
+- Prefer value semantics and protocol-oriented design; avoid force unwraps.
+- Keep business logic out of Views; use Engine pure functions.
+
+## Testing Guidelines
+- Unit tests live in `UltimateCoachTests/` and cover engine and seed loading.
+- Name tests as `test_<UnitOfWork>_<ExpectedBehavior>()`.
+- Run tests via Xcode or `xcodebuild … test` (above).
+
+## Commit & Pull Request Guidelines
+- Commits: small, focused, imperative (e.g., `Add periodization FSM tests`).
+- PRs include: purpose, screenshots for UI changes, and test notes. Ensure tests/build pass.
+
+## Agent-Specific Notes
+- SwiftData: update both sides of relationships (e.g., append to `program.days` and `day.exercises`) when inserting.
+- Seeding: `SeedData` uses embedded JSON if the bundle is missing; TodayView has a debug overlay to force-seed during development.
+- Target: iOS 17+; validated on iOS 26 simulator; no networking in v1.
