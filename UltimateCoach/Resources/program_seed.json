@@ -1,0 +1,51 @@
+{
+  "programName": "12 Week Strength+Hypertrophy",
+  "totalWeeks": 12,
+  "startDateISO8601": "2025-09-28T08:00:00Z",
+  "dayTemplates": [
+    {
+      "dayIdx": 1,
+      "exercises": [
+        {"name": "Bench Press", "muscleGroup": "chest", "equipment": "barbell", "sets": 4, "repMin": 8, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": 60.0},
+        {"name": "Overhead Press", "muscleGroup": "shoulders", "equipment": "barbell", "sets": 3, "repMin": 8, "repMax": 10, "restSec": 120, "tempo": null, "targetWeight": 35.0},
+        {"name": "Incline DB Press", "muscleGroup": "chest", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": 20.0},
+        {"name": "DB Curl", "muscleGroup": "biceps", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 90, "tempo": null, "targetWeight": 12.5},
+        {"name": "Dips", "muscleGroup": "triceps", "equipment": "bodyweight", "sets": 3, "repMin": 8, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": null}
+      ],
+      "conditioning": {"type": "row", "protocolText": "6x500m/90s", "targetZone": null, "targetPace": null, "durationMin": null}
+    },
+    {
+      "dayIdx": 2,
+      "exercises": [
+        {"name": "Back Squat", "muscleGroup": "legs", "equipment": "barbell", "sets": 4, "repMin": 6, "repMax": 10, "restSec": 180, "tempo": null, "targetWeight": 80.0},
+        {"name": "Romanian Deadlift", "muscleGroup": "hamstrings", "equipment": "barbell", "sets": 3, "repMin": 8, "repMax": 10, "restSec": 150, "tempo": null, "targetWeight": 70.0},
+        {"name": "Bulgarian Split Squat", "muscleGroup": "legs", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": 20.0}
+      ],
+      "conditioning": {"type": "row", "protocolText": "Zone2 25-30m", "targetZone": "Z2", "targetPace": null, "durationMin": 25}
+    },
+    {
+      "dayIdx": 3,
+      "exercises": [
+        {"name": "Pull-Ups", "muscleGroup": "back", "equipment": "bodyweight", "sets": 4, "repMin": 6, "repMax": 10, "restSec": 120, "tempo": null, "targetWeight": null},
+        {"name": "Barbell Row", "muscleGroup": "back", "equipment": "barbell", "sets": 3, "repMin": 8, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": 60.0},
+        {"name": "Chin-Ups", "muscleGroup": "back", "equipment": "bodyweight", "sets": 3, "repMin": 6, "repMax": 10, "restSec": 120, "tempo": null, "targetWeight": null},
+        {"name": "Incline DB Curl", "muscleGroup": "biceps", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 90, "tempo": null, "targetWeight": 12.5},
+        {"name": "Overhead Triceps Extension", "muscleGroup": "triceps", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 90, "tempo": null, "targetWeight": 15.0}
+      ],
+      "conditioning": {"type": "row", "protocolText": "Tabata 8x20/10", "targetZone": null, "targetPace": null, "durationMin": null}
+    },
+    {
+      "dayIdx": 5,
+      "exercises": [
+        {"name": "Incline DB Press", "muscleGroup": "chest", "equipment": "dumbbell", "sets": 3, "repMin": 8, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": 22.5},
+        {"name": "One-Arm Row", "muscleGroup": "back", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": 25.0},
+        {"name": "Lateral Raise", "muscleGroup": "shoulders", "equipment": "dumbbell", "sets": 3, "repMin": 12, "repMax": 15, "restSec": 90, "tempo": null, "targetWeight": 7.5},
+        {"name": "Chin-Ups", "muscleGroup": "back", "equipment": "bodyweight", "sets": 3, "repMin": 6, "repMax": 10, "restSec": 120, "tempo": null, "targetWeight": null},
+        {"name": "Hammer Curl", "muscleGroup": "biceps", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 90, "tempo": null, "targetWeight": 12.5},
+        {"name": "Dips", "muscleGroup": "triceps", "equipment": "bodyweight", "sets": 3, "repMin": 8, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": null}
+      ],
+      "conditioning": {"type": "row", "protocolText": "20m progressive", "targetZone": "Z2", "targetPace": null, "durationMin": 20}
+    }
+  ]
+}
+

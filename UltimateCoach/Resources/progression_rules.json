@@ -1,0 +1,9 @@
+{
+  "defaults": {
+    "barbellInc": 2.5,
+    "dbInc": 2.0,
+    "deloadPct": 0.10,
+    "missLimit": 3
+  }
+}
+

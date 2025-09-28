@@ -10,9 +10,17 @@ import SwiftData
 
 @main
 struct UltimateCoachApp: App {
+    // SwiftData container with app models
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Program.self,
+            DayPlan.self,
+            ExerciseTemplate.self,
+            DayExercise.self,
+            ExerciseLog.self,
+            ProgressionRule.self,
+            PhaseState.self,
+            Conditioning.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

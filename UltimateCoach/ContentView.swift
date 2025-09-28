@@ -9,53 +9,46 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @Environment(\.modelContext) private var context
+    @AppStorage("did_setup_start_date") private var didSetup = false
+    @State private var showStartDateSetup = false
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        } detail: {
-            Text("Select an item")
+        TabView {
+            TodayView()
+                .tabItem { Label("Today", systemImage: "calendar") }
+            ProgressScreen()
+                .tabItem { Label("Progress", systemImage: "chart.line.uptrend.xyaxis") }
+            SettingsView()
+                .tabItem { Label("Settings", systemImage: "gearshape") }
+        }
+        .onAppear {
+            evaluateSetup()
+            Task { await ensureSeededIfNeeded() }
+        }
+        .fullScreenCover(isPresented: $showStartDateSetup, onDismiss: {
+            Task { await ensureSeededIfNeeded() }
+        }) {
+            StartDateSetupView()
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
+    private func evaluateSetup() {
+        let count = (try? context.fetchCount(FetchDescriptor<Program>())) ?? 0
+        let hasProgram = count > 0
+        showStartDateSetup = !hasProgram
     }
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
+    @MainActor
+    private func ensureSeededIfNeeded() async {
+        let dayCount = (try? context.fetchCount(FetchDescriptor<DayPlan>())) ?? 0
+        if dayCount == 0 {
+            let program = try? context.fetch(FetchDescriptor<Program>()).first
+            await SeedData.seedIfNeeded(context: context, overrideStartDate: program?.startDate)
         }
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
 }
