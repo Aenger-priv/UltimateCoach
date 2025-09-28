@@ -8,14 +8,14 @@ struct TodayView: View {
     @State private var selectedExercise: DayExercise?
     @State private var showLogger = false
     @State private var isSeeding = false
-    @State private var didAttemptSeed = false
+    @State private var debugInfo: String = ""
 
     var body: some View {
         NavigationStack {
             List {
                 if let day = todayDay {
                     Section(header: Text("Week \(day.weekIdx) · Day \(day.dayIdx)")) {
-                        ForEach(day.exercises.sorted(by: { $0.orderIdx < $1.orderIdx })) { ex in
+                        ForEach(exercises(for: day), id: \.persistentModelID) { ex in
                             ExerciseCardView(exercise: ex) {
                                 selectedExercise = ex
                                 showLogger = true
@@ -32,16 +32,54 @@ struct TodayView: View {
                             Text("Seeding…")
                                 .foregroundStyle(.secondary)
                         }
+                    if !debugInfo.isEmpty {
+                        Text(debugInfo).font(.footnote).foregroundStyle(.secondary)
+                    }
                 } else {
-                    Text("Loading program…")
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Loading program…")
+                            .foregroundStyle(.secondary)
+                        if !debugInfo.isEmpty {
+                            Text(debugInfo).font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Button("Force Seed Now") {
+                            Task {
+                                isSeeding = true
+                                await SeedData.seedIfNeeded(context: context)
+                                try? context.save()
+                                isSeeding = false
+                                debugInfo = SeedData.lastStatus
+                                await loadDays()
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 }
                 }
             }
             .navigationTitle("Today")
             .task {
-                await ensureSeededIfNeeded()
                 await loadDays()
+                if days.isEmpty {
+                    isSeeding = true
+                    await SeedData.seedIfNeeded(context: context)
+                    try? context.save()
+                    isSeeding = false
+                    debugInfo = SeedData.lastStatus
+                    await loadDays()
+                    if days.isEmpty {
+                        // Emergency minimal seed to avoid empty UI
+                        await emergencySeed()
+                        await loadDays()
+                        debugInfo = SeedData.lastStatus + " | after emergency: Programs: \((try? context.fetchCount(FetchDescriptor<Program>())) ?? -1), Days: \(days.count)"
+                    }
+                } else {
+                    // If we have days but no exercises on current week/day, try to backfill from seed
+                    if (todayDay?.exercises.isEmpty ?? true) {
+                        await SeedData.fillMissingExercisesIfNeeded(context: context)
+                        await loadDays()
+                    }
+                }
             }
             .sheet(isPresented: $showLogger) {
                 if let ex = selectedExercise {
@@ -66,26 +104,42 @@ struct TodayView: View {
         return days.sorted(by: { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }).first
     }
 }
-
 extension TodayView {
-    @MainActor private func ensureSeededIfNeeded() async {
-        guard !didAttemptSeed else { return }
-        didAttemptSeed = true
-        let dayCount = (try? context.fetchCount(FetchDescriptor<DayPlan>())) ?? 0
-        if dayCount == 0 {
-            isSeeding = true
-            await SeedData.seedIfNeeded(context: context)
-            try? context.save()
-            isSeeding = false
-        }
-    }
-
     @MainActor private func loadDays() async {
         do {
             let desc = FetchDescriptor<DayPlan>(sortBy: [SortDescriptor(\.weekIdx), SortDescriptor(\.dayIdx)])
             days = try context.fetch(desc)
+            let pCount = try context.fetchCount(FetchDescriptor<Program>())
+            let dCount = days.count
+            debugInfo = "Programs: \(pCount), Days: \(dCount)"
         } catch {
             print("Load days error: \(error)")
+            debugInfo = "Load error: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor private func exercises(for day: DayPlan) -> [DayExercise] {
+        return day.exercises.sorted { $0.orderIdx < $1.orderIdx }
+    }
+
+    @MainActor private func emergencySeed() async {
+        let start = Calendar.current.startOfDay(for: Date())
+        let program = Program(name: "Default Program", startDate: start, totalWeeks: 12)
+        context.insert(program)
+        let day = DayPlan(program: program, weekIdx: 1, dayIdx: 1)
+        day.date = SeedData.computeDate(start: start, weekIdx: 1, dayIdx: 1)
+        context.insert(day)
+        program.days.append(day)
+        let bench = ExerciseTemplate(name: "Bench Press", muscleGroup: "chest", equipment: "barbell", defaultSets: 3, repMin: 8, repMax: 12, restSec: 120)
+        context.insert(bench)
+        let ex = DayExercise(day: day, template: bench, targetWeight: 60, targetRepsMin: 8, targetRepsMax: 12, sets: 3, orderIdx: 0, phase: "HYP")
+        context.insert(ex)
+        day.exercises.append(ex)
+        do {
+            try context.save()
+            debugInfo = (debugInfo + " | emergency seed OK")
+        } catch {
+            debugInfo = (debugInfo + " | emergency save error: \(error.localizedDescription)")
         }
     }
 }

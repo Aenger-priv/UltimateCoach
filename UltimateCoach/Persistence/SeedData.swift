@@ -2,6 +2,7 @@ import Foundation
 import SwiftData
 
 struct SeedData {
+    static var lastStatus: String = ""
     struct SeedConfig: Codable {
         let programName: String
         let totalWeeks: Int
@@ -34,15 +35,25 @@ struct SeedData {
 
     @MainActor static func seedIfNeeded(context: ModelContext, overrideStartDate: Date? = nil) async {
         let dayFetch = FetchDescriptor<DayPlan>(predicate: #Predicate<DayPlan> { _ in true })
-        if let count = try? context.fetchCount(dayFetch), count > 0 { return }
+        if let count = try? context.fetchCount(dayFetch), count > 0 {
+            Self.lastStatus = "Seed skipped: existing days=\(count)"
+            return
+        }
         let existingProgram = (try? context.fetch(FetchDescriptor<Program>()))?.first
 
         // Load embedded seed if bundle resource missing
         let data: Data
         if let url = Bundle.main.url(forResource: "program_seed", withExtension: "json") {
-            data = (try? Data(contentsOf: url)) ?? Data(embeddedSeedJSON.utf8)
+            if let d = try? Data(contentsOf: url) {
+                data = d
+                Self.lastStatus = "Using bundled JSON"
+            } else {
+                data = Data(embeddedSeedJSON.utf8)
+                Self.lastStatus = "Bundled JSON unreadable; using embedded"
+            }
         } else {
             data = Data(embeddedSeedJSON.utf8)
+            Self.lastStatus = "No bundled JSON; using embedded"
         }
         do {
             let decoder = JSONDecoder()
@@ -67,6 +78,7 @@ struct SeedData {
                     let day = DayPlan(program: program, weekIdx: week, dayIdx: dayTpl.dayIdx)
                     day.date = computeDate(start: start, weekIdx: week, dayIdx: dayTpl.dayIdx)
                     context.insert(day)
+                    program.days.append(day)
                     insertedDaysCount += 1
                     // Exercises
                     var order = 0
@@ -100,6 +112,7 @@ struct SeedData {
                             phase: "HYP"
                         )
                         context.insert(dayEx)
+                        day.exercises.append(dayEx)
                         order += 1
                     }
                     if let c = dayTpl.conditioning {
@@ -122,6 +135,7 @@ struct SeedData {
                 let day = DayPlan(program: program, weekIdx: 1, dayIdx: 1)
                 day.date = computeDate(start: start, weekIdx: 1, dayIdx: 1)
                 context.insert(day)
+                program.days.append(day)
                 let bench = ExerciseTemplate(
                     name: "Bench Press",
                     muscleGroup: "chest",
@@ -143,11 +157,19 @@ struct SeedData {
                     phase: "HYP"
                 )
                 context.insert(ex)
+                day.exercises.append(ex)
             }
 
-            try context.save()
+            do {
+                try context.save()
+                Self.lastStatus = "Seed OK: program=\(program.name), weeks=\(program.totalWeeks)"
+            } catch {
+                Self.lastStatus = "Seed save error: \(error.localizedDescription)"
+                throw error
+            }
         } catch {
             print("Seed error: \(error)")
+            Self.lastStatus = "Seed error: \(error.localizedDescription)"
             // Fallback: create a minimal default program/day if JSON decoding failed
             let start = Calendar.current.startOfDay(for: overrideStartDate ?? Date())
             let program: Program
@@ -165,7 +187,63 @@ struct SeedData {
             context.insert(bench)
             let ex = DayExercise(day: day, template: bench, targetWeight: 60, targetRepsMin: 8, targetRepsMax: 12, sets: 3, orderIdx: 0, phase: "HYP")
             context.insert(ex)
-            do { try context.save() } catch { print("Seed save error (catch fallback): \(error)") }
+            do {
+                try context.save()
+                Self.lastStatus += " | Fallback seed OK"
+            } catch {
+                print("Seed save error (catch fallback): \(error)")
+                Self.lastStatus += " | Fallback save error: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    @MainActor static func fillMissingExercisesIfNeeded(context: ModelContext) async {
+        // Find any days without exercises and populate from seed template for that dayIdx
+        do {
+            let days = try context.fetch(FetchDescriptor<DayPlan>())
+            guard days.contains(where: { $0.exercises.isEmpty }) else {
+                return
+            }
+            // Load seed templates
+            let data: Data
+            if let url = Bundle.main.url(forResource: "program_seed", withExtension: "json"), let d = try? Data(contentsOf: url) {
+                data = d
+            } else {
+                data = Data(embeddedSeedJSON.utf8)
+            }
+            let cfg = try JSONDecoder().decode(SeedConfig.self, from: data)
+            // Map name->template to reuse
+            var templatesByName: [String: ExerciseTemplate] = Dictionary(uniqueKeysWithValues: (try context.fetch(FetchDescriptor<ExerciseTemplate>())).map { ($0.name, $0) })
+
+            for day in days where day.exercises.isEmpty {
+                if let dayTpl = cfg.dayTemplates.first(where: { $0.dayIdx == day.dayIdx }) {
+                    var order = 0
+                    for ex in dayTpl.exercises {
+                        let tpl: ExerciseTemplate
+                        if let existing = templatesByName[ex.name] {
+                            tpl = existing
+                        } else {
+                            tpl = ExerciseTemplate(name: ex.name, muscleGroup: ex.muscleGroup, equipment: ex.equipment, defaultSets: ex.sets, repMin: ex.repMin, repMax: ex.repMax, restSec: ex.restSec, tempo: ex.tempo, phaseMode: "AUTO")
+                            context.insert(tpl)
+                            templatesByName[ex.name] = tpl
+                        }
+                        let dayEx = DayExercise(day: day, template: tpl, targetWeight: ex.targetWeight, targetRepsMin: ex.repMin, targetRepsMax: ex.repMax, sets: ex.sets, orderIdx: order, phase: "HYP")
+                        context.insert(dayEx)
+                        day.exercises.append(dayEx)
+                        order += 1
+                    }
+                    if day.conditioning == nil, let c = dayTpl.conditioning {
+                        let cond = Conditioning(day: day, type: c.type, protocolText: c.protocolText, targetZone: c.targetZone, targetPace: c.targetPace, durationMin: c.durationMin)
+                        context.insert(cond)
+                        day.conditioning = cond
+                    }
+                }
+            }
+            try context.save()
+            Self.lastStatus = (Self.lastStatus + " | Filled missing exercises")
+        } catch {
+            print("fillMissingExercisesIfNeeded error: \(error)")
+            Self.lastStatus = (Self.lastStatus + " | Fill error: \(error.localizedDescription)")
         }
     }
 

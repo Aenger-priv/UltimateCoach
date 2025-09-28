@@ -12,20 +12,17 @@ import SwiftData
 struct UltimateCoachApp: App {
     // SwiftData container with app models
     var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Program.self,
-            DayPlan.self,
-            ExerciseTemplate.self,
-            DayExercise.self,
-            ExerciseLog.self,
-            ProgressionRule.self,
-            PhaseState.self,
-            Conditioning.self
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            return try ModelContainer(for:
+                Program.self,
+                DayPlan.self,
+                ExerciseTemplate.self,
+                DayExercise.self,
+                ExerciseLog.self,
+                ProgressionRule.self,
+                PhaseState.self,
+                Conditioning.self
+            )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
