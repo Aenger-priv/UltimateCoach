@@ -21,7 +21,9 @@ struct ProgressScreen: View {
                         ForEach(history) { day in
                             NavigationLink { WorkoutScreen(day: day) } label: {
                                 VStack(alignment: .leading, spacing: 5) {
-                                    Text("Week \(day.weekIdx) · Day \(day.dayIdx)").font(.headline)
+                                    Text(day.isDeload ? "Deload · Day \(day.dayIdx)" : "Week \(day.weekIdx) · Day \(day.dayIdx)")
+                                        .font(.headline)
+                                    Text(day.program.name).font(.subheadline).foregroundStyle(CoachStyle.muted)
                                     if let date = day.activityDate {
                                         Text(date.formatted(date: .abbreviated, time: .omitted))
                                     }
@@ -51,12 +53,17 @@ struct ProgressScreen: View {
     }
 
     private var loggedExercises: [ExerciseTemplate] {
-        let ids = Set(history.flatMap(\.exercises).filter { !$0.logs.isEmpty }.map { $0.template.persistentModelID })
-        return templates.filter { ids.contains($0.persistentModelID) }
+        let logged = Set(history.flatMap(\.exercises).filter { !$0.logs.isEmpty }.map { exerciseKey($0.template) })
+        var seen = Set<String>()
+        return templates.filter { logged.contains(exerciseKey($0)) && seen.insert(exerciseKey($0)).inserted }
+    }
+
+    private func exerciseKey(_ template: ExerciseTemplate) -> String {
+        template.name + "|" + template.equipment
     }
 
     private func exposures(for template: ExerciseTemplate) -> [DayExercise] {
-        history.flatMap(\.exercises).filter { $0.template === template && !$0.logs.isEmpty }
+        history.flatMap(\.exercises).filter { exerciseKey($0.template) == exerciseKey(template) && !$0.logs.isEmpty }
     }
 }
 

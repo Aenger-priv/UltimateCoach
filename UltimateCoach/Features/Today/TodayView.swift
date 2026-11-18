@@ -2,7 +2,10 @@ import SwiftUI
 import SwiftData
 
 struct TodayView: View {
-    @Query(sort: \DayPlan.date) private var days: [DayPlan]
+    @Query(sort: \DayPlan.date) private var allDays: [DayPlan]
+    @Query private var programs: [Program]
+    private var days: [DayPlan] { allDays.filter { !$0.program.isArchived } }
+    private var activeProgram: Program? { programs.first { !$0.isArchived } }
     @Environment(\.scenePhase) private var scenePhase
     @State private var currentDate = Date()
 
@@ -15,6 +18,8 @@ struct TodayView: View {
                         .foregroundStyle(CoachStyle.muted)
                     if let active = days.first(where: { $0.status == .inProgress }) {
                         workoutCard(active, eyebrow: "IN PROGRESS", action: "Resume workout")
+                    } else if let program = activeProgram, program.stage(now: currentDate) == .readyForNextTrack {
+                        CycleActions(program: program, now: currentDate).coachCard()
                     } else if let today = days.first(where: isToday) {
                         workoutCard(today, eyebrow: today.status == .finished ? "SESSION SAVED" : "ON THE SCHEDULE",
                                     action: today.status == .finished ? "View workout" : "Open workout")
@@ -37,7 +42,7 @@ struct TodayView: View {
                             } label: {
                                 HStack(spacing: 12) {
                                     VStack(alignment: .leading, spacing: 5) {
-                                        Text("Week \(day.weekIdx) · Day \(day.dayIdx)").font(.headline)
+                                        Text(day.isDeload ? "Deload · Day \(day.dayIdx)" : "Week \(day.weekIdx) · Day \(day.dayIdx)").font(.headline)
                                         if let date = day.date {
                                             Text(date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
                                                 .font(.subheadline).foregroundStyle(CoachStyle.muted)
@@ -66,7 +71,7 @@ struct TodayView: View {
             Label(eyebrow, systemImage: "bolt.fill")
                 .font(.caption.weight(.bold)).tracking(1)
                 .foregroundStyle(CoachStyle.accent)
-            Text("Week \(day.weekIdx) · Day \(day.dayIdx)")
+            Text(day.isDeload ? "Deload · Day \(day.dayIdx)" : "Week \(day.weekIdx) · Day \(day.dayIdx)")
                 .font(.title.weight(.bold)).accessibilityAddTraits(.isHeader)
             if let date = day.date, !Calendar.current.isDate(date, inSameDayAs: currentDate) {
                 Text(date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))

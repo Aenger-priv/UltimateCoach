@@ -18,7 +18,7 @@ struct WorkoutScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 summary
-                if day.status == .planned {
+                if day.status == .planned && !day.program.isArchived {
                     Button("Start workout", systemImage: "play.fill") { attempt { try WorkoutSession.start(day, context: context) } }
                         .buttonStyle(CoachActionStyle())
                     if !day.hasResults {
@@ -117,11 +117,15 @@ struct WorkoutScreen: View {
 
     private var summary: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(day.status.rawValue)
+            Text(day.program.isArchived && day.status == .planned ? "Archived" : day.status.rawValue)
                 .font(.subheadline.weight(.semibold)).foregroundStyle(CoachStyle.accent)
-            Text("Week \(day.weekIdx) · Day \(day.dayIdx)")
+            Text(day.isDeload ? "Deload · Day \(day.dayIdx)" : "Week \(day.weekIdx) · Day \(day.dayIdx)")
                 .font(.title.bold()).accessibilityAddTraits(.isHeader)
             if let date = day.date { Text(date.formatted(date: .complete, time: .omitted)) }
+            if day.isDeload {
+                Text("Leave at least four reps in reserve. Use a lighter load or stop earlier if needed.")
+                    .foregroundStyle(CoachStyle.muted)
+            }
             Text("\(day.loggedSets) of \(day.plannedSets) sets saved")
                 .foregroundStyle(CoachStyle.muted)
         }

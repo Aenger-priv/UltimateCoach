@@ -49,7 +49,7 @@ struct SettingsView: View {
                         } catch { message = error.localizedDescription }
                     }
                     Button("Restore workout backup", systemImage: "square.and.arrow.down") { showingImporter = true }
-                    Text("Includes your plan and saved sets. App preferences are not included. Export a backup before replacing your plan.")
+                    Text("Includes your current cycle, past cycles, and saved sets. App preferences are not included. Export a backup before replacing your plan.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
@@ -87,7 +87,7 @@ struct SettingsView: View {
                 }
                 Button("Cancel", role: .cancel) { pendingImport = nil }
             } message: {
-                Text("This replaces your saved workouts. Export your current backup first if you want to keep them.")
+                Text("This replaces your cycles and saved workouts. Export your current backup first if you want to keep them.")
             }
             .alert("UltimateCoach", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
                 Button("OK") { message = nil }
@@ -104,7 +104,7 @@ struct SettingsView: View {
                         ToolbarItem(placement: .confirmationAction) { Button("Save") { adjustSchedule() } }
                     }
                     .onAppear {
-                        if let program = try? context.fetch(FetchDescriptor<Program>()).first { startDate = program.startDate }
+                        if let program = try? context.fetch(FetchDescriptor<Program>()).first(where: { !$0.isArchived }) { startDate = program.startDate }
                     }
                 }
             }
@@ -113,7 +113,7 @@ struct SettingsView: View {
 
     private func adjustSchedule() {
         do {
-            guard let program = try context.fetch(FetchDescriptor<Program>()).first else { return }
+            guard let program = try context.fetch(FetchDescriptor<Program>()).first(where: { !$0.isArchived }) else { return }
             try WorkoutSession.shiftUpcoming(program, to: startDate, context: context)
             showingSchedule = false
         } catch {

@@ -4,15 +4,20 @@ import SwiftData
 struct ProgramScreen: View {
     @Query private var programs: [Program]
     @State private var selectedWeek: Int?
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var now = Date()
+    private var activeProgram: Program? { programs.first { !$0.isArchived } }
 
     var body: some View {
         NavigationStack {
             List {
-                if let program = programs.first {
+                if let program = activeProgram {
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(program.name).font(.title2.bold()).accessibilityAddTraits(.isHeader)
-                            Text("\(program.totalWeeks) weeks · \(program.days.count) workouts")
+                            Text(program.deloadWeek == nil
+                                 ? "\(program.trainingWeeks) training weeks"
+                                 : "\(program.trainingWeeks) training weeks + deload")
                                 .foregroundStyle(CoachStyle.muted)
                         }
                         .padding(.vertical, 7)
@@ -20,8 +25,16 @@ struct ProgramScreen: View {
                             get: { selectedWeek ?? currentWeek(program) }, set: { selectedWeek = $0 }
                         )) {
                             ForEach(1...max(1, program.totalWeeks), id: \.self) { week in
-                                Text("Week \(week)").tag(week)
+                                Text(week == program.deloadWeek ? "Week \(week) · Deload" : "Week \(week)").tag(week)
                             }
+                        }
+                        .pickerStyle(.navigationLink)
+                        .accessibilityIdentifier("trainingWeekPicker")
+                    }
+                    if program.stage(now: now) != .training {
+                        Section {
+                            CycleActions(program: program, now: now)
+                                .padding(.vertical, 6)
                         }
                     }
                     Section("Workouts") {
@@ -44,12 +57,15 @@ struct ProgramScreen: View {
             .scrollContentBackground(.hidden)
             .coachBackground()
             .navigationTitle("Program")
+            .onChange(of: activeProgram?.persistentModelID) { selectedWeek = nil }
+            .onAppear { now = Date() }
+            .onChange(of: scenePhase) { if scenePhase == .active { now = Date() } }
         }
     }
 
     private func currentWeek(_ program: Program) -> Int {
         if let active = program.days.first(where: { $0.status == .inProgress }) { return active.weekIdx }
-        let today = Calendar.current.startOfDay(for: .now)
+        let today = Calendar.current.startOfDay(for: now)
         return program.days.filter { $0.status == .planned && ($0.date ?? .distantPast) >= today }
             .min { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) }?.weekIdx ?? program.totalWeeks
     }

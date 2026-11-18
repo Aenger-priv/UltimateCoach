@@ -49,7 +49,8 @@ public func computeNextTargets(
     rule: Rule,
     phase: String,
     consecutiveMisses: Int,
-    blockStartLoad: Double?
+    blockStartLoad: Double?,
+    minimumReserve: Double? = nil
 ) -> Target {
     // Never progress from missing, partial, invalid, or lighter-than-prescribed work.
     guard lastTarget.sets > 0, lastLogs.count == lastTarget.sets,
@@ -63,36 +64,24 @@ public func computeNextTargets(
        lastLogs.contains(where: { ($0.weight ?? 0) + 0.005 < prescribed }) {
         return lastTarget
     }
-    let top = lastTarget.repMax
-    let minReps = lastTarget.repMin
-    let targetRIRTop: Double = (phase == "HYP") ? 2.0 : 1.0
-    let avgRIR: Double = averageRIR(lastLogs) ?? targetRIRTop
-    let allAtTop = lastLogs.allSatisfy { $0.reps >= top }
-    let allAtOrBelowRIR = lastLogs.allSatisfy { ($0.rir ?? targetRIRTop) <= targetRIRTop }
-    let anyMiss = lastLogs.contains { $0.reps < minReps } || (avgRIR > 4)
+    let requiredReserve = minimumReserve ?? (phase == "HYP" ? 2.0 : 1.0)
+    let reachedTop = lastLogs.allSatisfy { $0.reps >= lastTarget.repMax }
+    let enoughReserve = lastLogs.allSatisfy { ($0.rir ?? requiredReserve) >= requiredReserve }
+    let missedRepFloor = lastLogs.contains { $0.reps < lastTarget.repMin }
+    let increment = rule.equipment == "barbell" ? rule.barbellInc : rule.dbInc
 
-    var nextWeight = lastTarget.weight
-    var nextRepMin = lastTarget.repMin
-    var nextRepMax = lastTarget.repMax
-    let inc = (rule.equipment == "barbell") ? rule.barbellInc : rule.dbInc
-
-    if allAtTop && allAtOrBelowRIR {
-        if let w = lastTarget.weight {
-            nextWeight = roundToIncrement(w + inc, inc)
-        } else {
-            nextWeight = roundToIncrement(inc, inc)
-        }
-    } else if consecutiveMisses + (anyMiss ? 1 : 0) >= rule.missLimit {
-        if let w = lastTarget.weight {
-            nextWeight = roundToIncrement(w * (1.0 - rule.deloadPct), inc)
-        }
-    } else if avgRIR > 3 {
-        // Reduce target rep range for next time (keep load)
-        nextRepMax = max(minReps, lastTarget.repMax - 1)
-        nextRepMin = min(nextRepMax, max(1, lastTarget.repMin - 1))
+    // Bodyweight work needs its own added-load policy. A missing external load is not a baseline.
+    guard let weight = lastTarget.weight else { return lastTarget }
+    let nextWeight: Double
+    if reachedTop && enoughReserve {
+        nextWeight = roundToIncrement(weight + increment, increment)
+    } else if missedRepFloor && consecutiveMisses + 1 >= rule.missLimit {
+        nextWeight = roundToIncrement(weight * (1 - rule.deloadPct), increment)
+    } else {
+        return lastTarget
     }
-
-    return Target(weight: nextWeight, repMin: nextRepMin, repMax: nextRepMax, sets: lastTarget.sets, phase: phase)
+    return Target(weight: nextWeight, repMin: lastTarget.repMin, repMax: lastTarget.repMax,
+                  sets: lastTarget.sets, phase: phase)
 }
 
 public func estimate1RM(weight: Double, reps: Int) -> Double {
@@ -100,12 +89,6 @@ public func estimate1RM(weight: Double, reps: Int) -> Double {
 }
 
 // MARK: - Helpers
-private func averageRIR(_ logs: [SetLog]) -> Double? {
-    let vals = logs.compactMap { $0.rir }
-    guard !vals.isEmpty else { return nil }
-    return vals.reduce(0, +) / Double(vals.count)
-}
-
 private func roundToIncrement(_ value: Double, _ inc: Double) -> Double {
     guard inc > 0 else { return value }
     let steps = (value / inc).rounded()

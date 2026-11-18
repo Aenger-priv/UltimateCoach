@@ -41,6 +41,8 @@ final class DayExercise {
     var targetWeight: Double? // kg
     var targetNote: String?
     var manualTarget: Bool?
+    var plannedRestSeconds: Int?
+    var restSeconds: Int { plannedRestSeconds ?? template.restSec }
     var targetRepsMin: Int
     var targetRepsMax: Int
     var sets: Int

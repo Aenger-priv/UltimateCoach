@@ -1,3 +1,4 @@
+/* This probe targets the original d6cbe67 engine sources. */
 import Foundation
 let target = Target(weight: 60, repMin: 8, repMax: 12, sets: 3, phase: "HYP")
 let rule = Rule(equipment: "barbell", barbellInc: 2.5, dbInc: 2, deloadPct: 0.10, missLimit: 3)

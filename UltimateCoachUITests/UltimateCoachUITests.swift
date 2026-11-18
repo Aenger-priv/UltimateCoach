@@ -9,6 +9,7 @@ final class UltimateCoachUITests: XCTestCase {
         app.launchArguments = ["--ui-testing"]
         app.launch()
         XCTAssertTrue(app.buttons["Use Today"].waitForExistence(timeout: 10))
+        for _ in 0..<4 where !app.buttons["Use Today"].isHittable { app.swipeUp() }
         app.buttons["Use Today"].tap()
         XCTAssertTrue(app.buttons["Open workout"].waitForExistence(timeout: 5))
         capture("Dark Today", app: app)
@@ -34,7 +35,7 @@ final class UltimateCoachUITests: XCTestCase {
         app.navigationBars.buttons["Today"].tap()
         XCTAssertTrue(app.buttons["Resume workout"].waitForExistence(timeout: 5))
         app.buttons["Resume workout"].tap()
-        XCTAssertTrue(app.staticTexts["4 of 16 sets saved"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["4 of 18 sets saved"].waitForExistence(timeout: 5))
         app.buttons["Finish workout"].tap()
         app.buttons["Finish and save"].tap()
         XCTAssertTrue(app.staticTexts["Finished"].waitForExistence(timeout: 5))
@@ -51,6 +52,54 @@ final class UltimateCoachUITests: XCTestCase {
         XCTAssertEqual(app.buttons["saveSet"].label, "Save changes")
         app.buttons["saveSet"].tap()
         XCTAssertTrue(app.buttons["Edit set 1"].isHittable)
+    }
+
+    @MainActor
+    func testStrengthTrackAndDeloadAreVisible() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        let strength = app.buttons["track_strength"]
+        XCTAssertTrue(strength.waitForExistence(timeout: 10))
+        if !strength.isHittable { app.swipeUp() }
+        strength.tap()
+        capture("Training track selection", app: app)
+        let create = app.buttons["createCycle"]
+        for _ in 0..<4 where !create.isHittable { app.swipeUp() }
+        create.tap()
+        XCTAssertTrue(app.buttons["Open workout"].waitForExistence(timeout: 5))
+        app.buttons["Open workout"].tap()
+        XCTAssertTrue(app.staticTexts["3 sets · 3–5 reps"].exists)
+        app.tabBars.buttons["Program"].tap()
+        let picker = app.buttons["trainingWeekPicker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        picker.tap()
+        let deload = app.buttons["Week 13 · Deload"]
+        XCTAssertTrue(deload.waitForExistence(timeout: 5))
+        deload.tap()
+        XCTAssertTrue(app.staticTexts["Day 1"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testExpiredCycleSuggestsOppositeTrackAndRequiresConfirmation() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--expired-cycle"]
+        app.launch()
+        let rollover = app.buttons["Choose next track"]
+        XCTAssertTrue(rollover.waitForExistence(timeout: 10))
+        rollover.tap()
+        let confirm = app.buttons["createCycle"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertEqual(confirm.label, "Start Strength cycle")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(rollover.waitForExistence(timeout: 5))
+        rollover.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !confirm.isHittable { app.swipeUp() }
+        confirm.tap()
+        XCTAssertTrue(app.buttons["Open workout"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["Program"].tap()
+        XCTAssertTrue(app.staticTexts["Strength"].waitForExistence(timeout: 5))
     }
 
     @MainActor

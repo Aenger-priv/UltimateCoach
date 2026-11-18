@@ -1,27 +1,34 @@
+import Foundation
 import XCTest
 @testable import UltimateCoach
 
-@MainActor
 final class PeriodizationFSMTests: XCTestCase {
-    func testSwitchToSTRWithLowRIRAndFivePercentGain() throws {
-        let history = [SetLog(weight: 60, reps: 12, rir: 1), SetLog(weight: 60, reps: 12, rir: 1)]
-        let result = shouldSwitchPhase(history: history, currentPhase: "HYP", blockStartLoad: 60, currentLoad: 63)
-        XCTAssertEqual(result, "STR")
+    private let trainingEnds = Date(timeIntervalSince1970: 100)
+    private let cycleEnds = Date(timeIntervalSince1970: 200)
+
+    func testStageBoundaries() {
+        XCTAssertEqual(stage(at: 99), .training)
+        XCTAssertEqual(stage(at: 100), .deload)
+        XCTAssertEqual(stage(at: 199), .deload)
+        XCTAssertEqual(stage(at: 200), .readyForNextTrack)
     }
 
-    func testSwitchBackToHYPOnHighRIR() throws {
-        let history = [SetLog(weight: 100, reps: 4, rir: 3.5), SetLog(weight: 100, reps: 4, rir: 3.0)]
-        let result = shouldSwitchPhase(history: history, currentPhase: "STR", blockStartLoad: 100, currentLoad: 100)
-        XCTAssertEqual(result, "HYP")
+    func testActiveWorkoutBlocksRolloverAndLegacyHasNoImplicitDeload() {
+        XCTAssertEqual(stage(at: 200, active: true), .deload)
+        XCTAssertEqual(stage(at: 100, deload: false), .training)
+        XCTAssertEqual(stage(at: 200, deload: false, active: true), .training)
+        XCTAssertEqual(stage(at: 200, deload: false), .readyForNextTrack)
     }
-}
 
+    func testLoadSuggestionsStayLighterAndAccountForHigherReps() {
+        XCTAssertEqual(TrainingCycle.startingLoad(previousWeight: 100, previousReps: 5, targetReps: 3), 90)
+        XCTAssertLessThan(TrainingCycle.startingLoad(previousWeight: 100, previousReps: 3, targetReps: 12), 90)
+        XCTAssertNil(TrainingCycle.recoveryLoad(from: nil))
+        XCTAssertEqual(TrainingCycle.recoveryLoad(from: 50), 42.5)
+    }
 
-extension PeriodizationFSMTests {
-    func testIncompleteEvidenceKeepsPhase() {
-        let history = [SetLog(weight: 60, reps: 8, rir: nil)]
-        XCTAssertEqual(shouldSwitchPhase(history: history, currentPhase: "HYP", blockStartLoad: nil, currentLoad: 60), "HYP")
-        XCTAssertEqual(shouldSwitchPhase(history: history, currentPhase: "HYP", blockStartLoad: 60, currentLoad: 63), "HYP")
-        XCTAssertEqual(shouldSwitchPhase(history: history, currentPhase: "STR", blockStartLoad: 60, currentLoad: 63), "STR")
+    private func stage(at time: TimeInterval, deload: Bool = true, active: Bool = false) -> TrainingCycle.Stage {
+        TrainingCycle.stage(on: Date(timeIntervalSince1970: time), trainingEnds: trainingEnds, cycleEnds: cycleEnds,
+            hasDeload: deload, hasActiveWorkout: active)
     }
 }

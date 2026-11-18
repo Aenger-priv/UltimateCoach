@@ -23,7 +23,7 @@ struct ExerciseCardView: View {
             if let note = exercise.targetNote {
                 Text(note).font(.footnote).foregroundStyle(CoachStyle.muted)
             }
-            if exercise.day.status == .planned && exercise.logs.isEmpty {
+            if !exercise.day.program.isArchived && exercise.day.status == .planned && exercise.logs.isEmpty {
                 Button("Edit target weight", systemImage: "slider.horizontal.3", action: onEditTarget)
                     .buttonStyle(CoachActionStyle(primary: false))
                     .accessibilityLabel("Edit target weight, \(exercise.template.name)")

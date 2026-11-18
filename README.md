@@ -1,6 +1,6 @@
 # UltimateCoach
 
-An offline iPhone and iPad app for following a 12-week strength program, logging workouts, and reviewing progress.
+An offline iPhone and iPad app for following a strength or hypertrophy track, logging workouts, and reviewing progress.
 
 ## Run locally
 
@@ -19,12 +19,12 @@ Use `xcrun simctl list devices available` to choose another installed simulator.
 ## Use the app
 
 - **Today** opens the scheduled workout or resumes the active one.
-- **Program** shows all 12 weeks. Open a planned workout to set target weights, start, reschedule, or skip it.
+- **Program** shows 12 training weeks and a lighter Week 13. Open a planned workout to set target weights, start, reschedule, or skip it.
 - **Workout** separates targets, saved sets, and conditioning. Enter or adjust weight, log reps, optionally record reps in reserve, and finish when done. The rest timer follows the active session. Seed loads are examples. Next-workout targets explain why they changed.
 - **Progress** shows workout history and trends for logged exercises. Open a workout to correct individual sets.
-- **Settings** sets weight units and increments, moves upcoming sessions, and exports or restores workout backups. Backups include plan and workout data. Preferences are stored separately.
+- **Settings** sets weight units and increments, moves upcoming sessions, and exports or restores workout backups. Backups include the current cycle, archived cycles, and workout data. Preferences are stored separately.
 
-Auto-periodization, scheduled deloads, and automatic conditioning progression are planned. See the [audit and revival plan](docs/REVIVAL_PLAN.md) for design decisions and delivery stages.
+Choose Hypertrophy or Strength before starting. After the deload, the app suggests the opposite track and lets you choose either one. See the [programming and research notes](docs/TRAINING_TRACKS.md) and [original revival audit](docs/REVIVAL_PLAN.md).
 
 ## Layout
 

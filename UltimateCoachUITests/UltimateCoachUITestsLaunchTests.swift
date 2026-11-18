@@ -8,7 +8,7 @@ final class UltimateCoachUITestsLaunchTests: XCTestCase {
         app.launch()
         let start = app.buttons["Use Today"]
         XCTAssertTrue(start.waitForExistence(timeout: 10))
-        if !start.isHittable { app.swipeUp() }
+        for _ in 0..<6 where !start.isHittable { app.swipeUp() }
         start.tap()
         XCTAssertTrue(app.buttons["Open workout"].waitForExistence(timeout: 5))
         if !app.buttons["Open workout"].isHittable { app.swipeUp() }

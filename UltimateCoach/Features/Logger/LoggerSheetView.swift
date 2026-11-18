@@ -59,6 +59,10 @@ struct LoggerSheetView: View {
                 Text(exercise.targetWeight.map { WeightUnit.formatted($0, useKilograms: unitsKg) } ?? "Bodyweight")
                     .foregroundStyle(CoachStyle.muted)
                     .font(.subheadline)
+                if exercise.day.program.track != nil || exercise.day.isDeload {
+                    Text(exercise.day.isDeload ? "Aim for 4 or more reps in reserve" : "Aim for around 2 reps in reserve")
+                        .font(.footnote).foregroundStyle(CoachStyle.muted)
+                }
             }
             .coachCard()
 
@@ -184,7 +188,8 @@ struct LoggerSheetView: View {
             .formatted(.number.locale(locale).grouping(.never).precision(.fractionLength(0...3)))
         reps = log?.reps ?? exercise.targetRepsMin
         if reps > 100 { reps = 100 }
-        rir = log?.rir ?? (exercise.phase == "HYP" ? 2 : 1)
+        let reserve = exercise.day.isDeload ? 4.0 : (exercise.day.program.track == nil && exercise.phase == "STR" ? 1 : 2)
+        rir = log?.rir ?? reserve
         recordEffort = log?.rir != nil
     }
 

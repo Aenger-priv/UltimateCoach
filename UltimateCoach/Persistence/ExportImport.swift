@@ -4,13 +4,17 @@ import SwiftData
 // Lightweight export/import using DTOs to avoid SwiftData graph encoding.
 struct ExportImport {
     struct ExportProgram: Codable {
-        var formatVersion: Int? = 3
+        var formatVersion: Int? = 4
         let name: String
         let startDate: Date
         let totalWeeks: Int
         let days: [ExportDay]
         var rules: [ExportRule]? = nil
         var phases: [ExportPhase]? = nil
+        var trackCode: String? = nil
+        var deloadWeek: Int? = nil
+        var archivedAt: Date? = nil
+        var archivedCycles: [ExportProgram]? = nil
     }
     struct ExportDay: Codable {
         let weekIdx: Int
@@ -40,6 +44,7 @@ struct ExportImport {
         let logs: [ExportLog]
         var targetNote: String? = nil
         var manualTarget: Bool? = nil
+        var plannedRestSeconds: Int? = nil
     }
     struct ExportLog: Codable { let setIdx: Int; let actualWeight: Double?; let reps: Int; let rir: Double?; let timestamp: Date }
     struct ExportConditioning: Codable {
@@ -70,7 +75,23 @@ struct ExportImport {
 
     @MainActor static func exportJSON(context: ModelContext) throws -> Data {
         let programs = try context.fetch(FetchDescriptor<Program>())
-        guard programs.count == 1, let program = programs.first else { throw BackupError.invalid("Expected one program to export.") }
+        let active = programs.filter { !$0.isArchived }
+        guard active.count == 1, let program = active.first else {
+            throw BackupError.invalid("Expected one active program to export.")
+        }
+        let rules = try context.fetch(FetchDescriptor<ProgressionRule>())
+        let phases = try context.fetch(FetchDescriptor<PhaseState>())
+        var root = snapshot(program, rules: rules, phases: phases)
+        let archivedCycles = programs.filter(\.isArchived)
+            .sorted { ($0.archivedAt ?? .distantPast, $0.startDate) < ($1.archivedAt ?? .distantPast, $1.startDate) }
+            .map { snapshot($0, rules: rules, phases: phases) }
+        if !archivedCycles.isEmpty { root.archivedCycles = archivedCycles }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(root)
+    }
+
+    private static func snapshot(_ program: Program, rules: [ProgressionRule], phases: [PhaseState]) -> ExportProgram {
         let days = program.days.sorted { ($0.weekIdx, $0.dayIdx) < ($1.weekIdx, $1.dayIdx) }
         let dds: [ExportDay] = days.map { day in
             let exs = day.exercises.sorted { $0.orderIdx < $1.orderIdx }.map { ex in
@@ -90,7 +111,7 @@ struct ExportImport {
                     targetRepsMax: ex.targetRepsMax,
                     phase: ex.phase,
                     logs: exportLogs(ex.logs),
-                    targetNote: ex.targetNote, manualTarget: ex.manualTarget
+                    targetNote: ex.targetNote, manualTarget: ex.manualTarget, plannedRestSeconds: ex.plannedRestSeconds
                 )
             }
             let cond = day.conditioning.map {
@@ -101,18 +122,17 @@ struct ExportImport {
             return ExportDay(weekIdx: day.weekIdx, dayIdx: day.dayIdx, date: day.date, exercises: exs, conditioning: cond, startedAt: day.startedAt, finishedAt: day.finishedAt,
                              skippedAt: day.skippedAt)
         }
-        let rules = try context.fetch(FetchDescriptor<ProgressionRule>()).map {
+        let templateIDs = Set(program.days.flatMap(\.exercises).map { $0.template.persistentModelID })
+        let savedRules = rules.filter { templateIDs.contains($0.template.persistentModelID) }.map {
             ExportRule(templateName: $0.template.name, equipment: $0.template.equipment, type: $0.type, paramsJSON: $0.paramsJSON)
         }
-        let phases = try context.fetch(FetchDescriptor<PhaseState>()).map {
+        let savedPhases = phases.filter { templateIDs.contains($0.template.persistentModelID) }.map {
             ExportPhase(templateName: $0.template.name, equipment: $0.template.equipment, currentPhase: $0.currentPhase,
                 eligibilityScore: $0.eligibilityScore, blockStartLoad: $0.blockStartLoad, lastSwitchAt: $0.lastSwitchAt)
         }
-        let root = ExportProgram(name: program.name, startDate: program.startDate, totalWeeks: program.totalWeeks,
-                                 days: dds, rules: rules, phases: phases)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(root)
+        return ExportProgram(name: program.name, startDate: program.startDate, totalWeeks: program.totalWeeks,
+                             days: dds, rules: savedRules, phases: savedPhases, trackCode: program.trackCode,
+                             deloadWeek: program.deloadWeek, archivedAt: program.archivedAt)
     }
 
     private static func exportLogs(_ logs: [ExerciseLog]) -> [ExportLog] {
@@ -133,12 +153,31 @@ struct ExportImport {
 
     static func validatedProgram(_ data: Data) throws -> ExportProgram {
         let root = try JSONDecoder().decode(ExportProgram.self, from: data)
-        guard (1...3).contains(root.formatVersion ?? 1), (1...104).contains(root.totalWeeks),
+        guard root.archivedAt == nil, (root.archivedCycles?.count ?? 0) <= 100 else {
+            throw BackupError.invalid("This backup has invalid cycle history.")
+        }
+        try validate(root)
+        for archive in root.archivedCycles ?? [] {
+            guard archive.archivedAt != nil, archive.archivedCycles == nil else {
+                throw BackupError.invalid("This backup has invalid cycle history.")
+            }
+            try validate(archive)
+        }
+        return root
+    }
+
+    private static func validate(_ root: ExportProgram) throws {
+        guard (1...4).contains(root.formatVersion ?? 1), (1...104).contains(root.totalWeeks),
               !root.name.isEmpty, !root.days.isEmpty, root.days.count <= 728 else {
             throw BackupError.invalid("This backup has an unsupported version or invalid program.")
         }
-        guard root.days.filter({ $0.startedAt != nil && $0.finishedAt == nil && $0.skippedAt == nil }).count <= 1 else {
+        let activeCount = root.days.filter { $0.startedAt != nil && $0.finishedAt == nil && $0.skippedAt == nil }.count
+        guard activeCount <= (root.archivedAt == nil ? 1 : 0) else {
             throw BackupError.invalid("This backup contains more than one active workout.")
+        }
+        guard root.trackCode.map({ TrainingTrack(rawValue: $0) != nil }) ?? true,
+              root.deloadWeek.map({ $0 == root.totalWeeks && $0 > 1 && root.days.contains { day in day.weekIdx == root.totalWeeks } }) ?? true else {
+            throw BackupError.invalid("This backup has invalid training track details.")
         }
         var dayKeys = Set<String>()
         for day in root.days {
@@ -158,7 +197,8 @@ struct ExportImport {
                       (1...100).contains(exercise.targetRepsMin), exercise.targetRepsMax >= exercise.targetRepsMin,
                       exercise.targetRepsMax <= 100, ["HYP", "STR"].contains(exercise.phase),
                       exercise.targetWeight.map({ $0.isFinite && $0 >= 0 }) ?? true,
-                      exercise.restSec.map({ (0...3600).contains($0) }) ?? true else {
+                      exercise.restSec.map({ (0...3600).contains($0) }) ?? true,
+                      exercise.plannedRestSeconds.map({ (0...3600).contains($0) }) ?? true else {
                     throw BackupError.invalid("This backup contains an invalid exercise.")
                 }
                 var indexes = Set<Int>()
@@ -172,7 +212,6 @@ struct ExportImport {
                 }
             }
         }
-        return root
     }
 
     // Validate before touching live data, then save replacement in one operation.
@@ -191,73 +230,83 @@ struct ExportImport {
             try removeAll(PhaseState.self, context: context)
             try removeAll(ExerciseTemplate.self, context: context)
             try removeAll(Program.self, context: context)
-            let program = Program(name: root.name, startDate: root.startDate, totalWeeks: root.totalWeeks)
-            context.insert(program)
-            var templates: [String: ExerciseTemplate] = [:]
-            for day in root.days {
-                let d = DayPlan(program: program, weekIdx: day.weekIdx, dayIdx: day.dayIdx)
-                d.date = day.date
-                d.startedAt = day.startedAt
-                d.finishedAt = day.finishedAt
-                d.skippedAt = day.skippedAt
-                context.insert(d)
-                program.days.append(d)
-                for (index, ex) in day.exercises.enumerated() {
-                    let key = ex.templateName + "|" + ex.equipment
-                    let template = templates[key] ?? ExerciseTemplate(name: ex.templateName,
-                        muscleGroup: ex.muscleGroup ?? "", equipment: ex.equipment, defaultSets: ex.defaultSets ?? ex.sets,
-                        repMin: ex.defaultRepMin ?? ex.targetRepsMin, repMax: ex.defaultRepMax ?? ex.targetRepsMax, restSec: ex.restSec ?? 120,
-                        tempo: ex.tempo, phaseMode: ex.phaseMode ?? "AUTO")
-                    if templates[key] == nil {
-                        context.insert(template)
-                        templates[key] = template
-                    }
-                    let de = DayExercise(day: d, template: template, targetWeight: ex.targetWeight,
-                        targetRepsMin: ex.targetRepsMin, targetRepsMax: ex.targetRepsMax,
-                        sets: ex.sets, orderIdx: index, phase: ex.phase)
-                    de.targetNote = ex.targetNote
-                    de.manualTarget = ex.manualTarget
-                    context.insert(de)
-                    d.exercises.append(de)
-                    let duplicateIndices = Set(ex.logs.map(\.setIdx)).count != ex.logs.count
-                    for (index, value) in ex.logs.enumerated() {
-                        let log = ExerciseLog(dayExercise: de, setIdx: duplicateIndices ? index + 1 : value.setIdx,
-                            actualWeight: value.actualWeight,
-                            reps: value.reps, rir: value.rir, timestamp: value.timestamp)
-                        context.insert(log)
-                        if !de.logs.contains(where: { $0 === log }) { de.logs.append(log) }
-                    }
-                }
-                if let c = day.conditioning {
-                    let conditioning = Conditioning(day: d, type: c.type, protocolText: c.protocolText,
-                        targetZone: c.targetZone, targetPace: c.targetPace, durationMin: c.durationMin)
-                    conditioning.loggedMinutes = c.loggedMinutes
-                    conditioning.loggedMeters = c.loggedMeters
-                    conditioning.loggedAt = c.loggedAt
-                    context.insert(conditioning)
-                    d.conditioning = conditioning
-                }
-            }
-            for rule in root.rules ?? [] {
-                guard let template = templates[rule.templateName + "|" + rule.equipment] else {
-                    throw BackupError.invalid("A progression rule refers to a missing exercise.")
-                }
-                context.insert(ProgressionRule(template: template, type: rule.type, paramsJSON: rule.paramsJSON))
-            }
-            for value in root.phases ?? [] {
-                guard let template = templates[value.templateName + "|" + value.equipment] else {
-                    throw BackupError.invalid("A training phase refers to a missing exercise.")
-                }
-                let state = PhaseState(template: template, currentPhase: value.currentPhase)
-                state.eligibilityScore = value.eligibilityScore
-                state.blockStartLoad = value.blockStartLoad
-                state.lastSwitchAt = value.lastSwitchAt
-                context.insert(state)
+            for cycle in [root] + (root.archivedCycles ?? []) {
+                try restore(cycle, context: context)
             }
             try context.save()
         } catch {
             context.rollback()
             throw error
+        }
+    }
+
+    private static func restore(_ root: ExportProgram, context: ModelContext) throws {
+        let program = Program(name: root.name, startDate: root.startDate, totalWeeks: root.totalWeeks)
+        program.trackCode = root.trackCode
+        program.deloadWeek = root.deloadWeek
+        program.archivedAt = root.archivedAt
+        context.insert(program)
+        var templates: [String: ExerciseTemplate] = [:]
+        for day in root.days {
+            let d = DayPlan(program: program, weekIdx: day.weekIdx, dayIdx: day.dayIdx)
+            d.date = day.date
+            d.startedAt = day.startedAt
+            d.finishedAt = day.finishedAt
+            d.skippedAt = day.skippedAt
+            context.insert(d)
+            program.days.append(d)
+            for (index, ex) in day.exercises.enumerated() {
+                let key = ex.templateName + "|" + ex.equipment
+                let template = templates[key] ?? ExerciseTemplate(name: ex.templateName,
+                    muscleGroup: ex.muscleGroup ?? "", equipment: ex.equipment, defaultSets: ex.defaultSets ?? ex.sets,
+                    repMin: ex.defaultRepMin ?? ex.targetRepsMin, repMax: ex.defaultRepMax ?? ex.targetRepsMax, restSec: ex.restSec ?? 120,
+                    tempo: ex.tempo, phaseMode: ex.phaseMode ?? "AUTO")
+                if templates[key] == nil {
+                    context.insert(template)
+                    templates[key] = template
+                }
+                let de = DayExercise(day: d, template: template, targetWeight: ex.targetWeight,
+                    targetRepsMin: ex.targetRepsMin, targetRepsMax: ex.targetRepsMax,
+                    sets: ex.sets, orderIdx: index, phase: ex.phase)
+                de.targetNote = ex.targetNote
+                de.manualTarget = ex.manualTarget
+                de.plannedRestSeconds = ex.plannedRestSeconds
+                context.insert(de)
+                d.exercises.append(de)
+                let duplicateIndices = Set(ex.logs.map(\.setIdx)).count != ex.logs.count
+                for (index, value) in ex.logs.enumerated() {
+                    let log = ExerciseLog(dayExercise: de, setIdx: duplicateIndices ? index + 1 : value.setIdx,
+                        actualWeight: value.actualWeight,
+                        reps: value.reps, rir: value.rir, timestamp: value.timestamp)
+                    context.insert(log)
+                    if !de.logs.contains(where: { $0 === log }) { de.logs.append(log) }
+                }
+            }
+            if let c = day.conditioning {
+                let conditioning = Conditioning(day: d, type: c.type, protocolText: c.protocolText,
+                    targetZone: c.targetZone, targetPace: c.targetPace, durationMin: c.durationMin)
+                conditioning.loggedMinutes = c.loggedMinutes
+                conditioning.loggedMeters = c.loggedMeters
+                conditioning.loggedAt = c.loggedAt
+                context.insert(conditioning)
+                d.conditioning = conditioning
+            }
+        }
+        for rule in root.rules ?? [] {
+            guard let template = templates[rule.templateName + "|" + rule.equipment] else {
+                throw BackupError.invalid("A progression rule refers to a missing exercise.")
+            }
+            context.insert(ProgressionRule(template: template, type: rule.type, paramsJSON: rule.paramsJSON))
+        }
+        for value in root.phases ?? [] {
+            guard let template = templates[value.templateName + "|" + value.equipment] else {
+                throw BackupError.invalid("A training phase refers to a missing exercise.")
+            }
+            let state = PhaseState(template: template, currentPhase: value.currentPhase)
+            state.eligibilityScore = value.eligibilityScore
+            state.blockStartLoad = value.blockStartLoad
+            state.lastSwitchAt = value.lastSwitchAt
+            context.insert(state)
         }
     }
 

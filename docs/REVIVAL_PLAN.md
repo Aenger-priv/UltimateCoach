@@ -1,5 +1,7 @@
 # UltimateCoach revival
 
+For the later track and cycle design, see [Training tracks](TRAINING_TRACKS.md).
+
 Reviewed from the September 2025 baseline at `d6cbe67`. The product direction is an offline workout companion for someone following a strength program. The central loop is to see the next workout, record what actually happened, and understand what the plan asks for next.
 
 ## Audit

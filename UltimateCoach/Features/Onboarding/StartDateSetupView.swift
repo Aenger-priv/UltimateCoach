@@ -3,10 +3,23 @@ import SwiftData
 
 struct StartDateSetupView: View {
     @Environment(\.modelContext) private var context
-    @State private var selectedDate = Date()
+    @Environment(\.dismiss) private var dismiss
+    let previous: Program?
+    @State private var selectedTrack: TrainingTrack
+    @State private var selectedDate: Date
     @State private var changeDate = false
-    @State private var seeding = false
     @State private var errorMessage: String?
+
+    init(previous: Program? = nil) {
+        self.previous = previous
+        let recommended = (previous?.track ?? .hypertrophy).alternate
+        _selectedTrack = State(initialValue: previous == nil ? .hypertrophy : recommended)
+        _selectedDate = State(initialValue: max(Date(), previous?.nextStartDate() ?? .distantPast))
+    }
+
+    private var minimumDate: Date {
+        previous?.nextStartDate() ?? .distantPast
+    }
 
     var body: some View {
         NavigationStack {
@@ -15,42 +28,74 @@ struct StartDateSetupView: View {
                     Image(systemName: "dumbbell.fill")
                         .font(.largeTitle.weight(.semibold)).foregroundStyle(CoachStyle.accent)
                         .accessibilityHidden(true)
-                    Text("UltimateCoach")
+                    Text(previous == nil ? "Choose your training track" : "Choose your next track")
                         .font(.largeTitle.bold()).accessibilityAddTraits(.isHeader)
-                    Text("Follow a strength plan, log your sets, and see what to aim for next.")
-                        .font(.title3).foregroundStyle(CoachStyle.muted)
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("Your first program").font(.headline)
-                        Text("12 weeks · 4 workouts per week").foregroundStyle(CoachStyle.muted)
-                        Text("Example weights are prefilled. Enter the weight you actually use when logging each set.")
-                            .font(.subheadline).foregroundStyle(CoachStyle.muted)
+                    Text("12 training weeks · 4 sessions per week · 1 lighter week")
+                        .font(.subheadline).foregroundStyle(CoachStyle.muted)
+                    if let previous {
+                        Text("\((previous.track ?? .hypertrophy).alternate.title) is suggested after your last cycle. You can repeat either track.")
+                            .foregroundStyle(CoachStyle.muted)
+                    }
+                    ForEach(TrainingTrack.allCases) { track in
+                        trackCard(track)
+                    }
+                    VStack(alignment: .leading, spacing: 12) {
                         Toggle("Pick a different start date", isOn: $changeDate)
                             .fixedSize(horizontal: false, vertical: true)
                         if changeDate {
-                            DatePicker("Start date", selection: $selectedDate, displayedComponents: .date)
+                            DatePicker("Start date", selection: $selectedDate, in: minimumDate..., displayedComponents: .date)
                         }
+                        Text("Review the starting weights before lifting. You can edit each planned weight.")
+                            .font(.subheadline).foregroundStyle(CoachStyle.muted)
                     }
                     .coachCard()
-                    Button(changeDate ? "Create my plan" : "Use Today", systemImage: "arrow.right") {
-                        Task { await seed(with: changeDate ? selectedDate : .now) }
-                    }
-                    .buttonStyle(CoachActionStyle())
-                    if seeding { ProgressView("Creating plan…") }
+                    Button(previous == nil && !changeDate ? "Use Today" : "Start \(selectedTrack.title) cycle",
+                           systemImage: "arrow.right") { createCycle() }
+                        .buttonStyle(CoachActionStyle())
+                        .accessibilityIdentifier("createCycle")
                     if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
                 }
                 .coachPage()
             }
             .coachBackground()
-            .disabled(seeding)
+            .toolbar {
+                if previous != nil {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                }
+            }
         }
     }
 
-    private func seed(with date: Date) async {
-        guard !seeding else { return }
-        seeding = true
+    private func trackCard(_ track: TrainingTrack) -> some View {
+        let selected = track == selectedTrack
+        return Button {
+            selectedTrack = track
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(track.title).font(.headline)
+                    Text(track.summary).font(.subheadline).foregroundStyle(CoachStyle.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? CoachStyle.accent : CoachStyle.muted)
+                    .accessibilityHidden(true)
+            }
+            .coachCard()
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityLabel(track.title)
+        .accessibilityHint(track.summary)
+        .accessibilityIdentifier("track_\(track.rawValue)")
+    }
+
+    private func createCycle() {
         errorMessage = nil
-        defer { seeding = false }
-        do { try await SeedData.seedIfNeeded(context: context, overrideStartDate: date) }
-        catch { errorMessage = "Could not create your plan. " + error.localizedDescription }
+        do {
+            try SeedData.startCycle(selectedTrack, starts: changeDate ? selectedDate : max(Date(), minimumDate), context: context)
+            if previous != nil { dismiss() }
+        } catch { errorMessage = error.localizedDescription }
     }
 }

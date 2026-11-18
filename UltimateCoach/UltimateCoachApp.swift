@@ -37,8 +37,15 @@ struct UltimateCoachApp: App {
         #else
         let testStore = false
         #endif
-        return try ModelContainer(for: Program.self, DayPlan.self, ExerciseTemplate.self, DayExercise.self,
+        let container = try ModelContainer(for: Program.self, DayPlan.self, ExerciseTemplate.self, DayExercise.self,
                                   ExerciseLog.self, ProgressionRule.self, PhaseState.self, Conditioning.self,
                                   configurations: ModelConfiguration(isStoredInMemoryOnly: testStore))
+        #if DEBUG
+        if testStore, ProcessInfo.processInfo.arguments.contains("--expired-cycle") {
+            let start = Calendar.current.date(byAdding: .day, value: -100, to: .now) ?? .distantPast
+            try SeedData.startCycle(.hypertrophy, starts: start, context: container.mainContext)
+        }
+        #endif
+        return container
     }
 }

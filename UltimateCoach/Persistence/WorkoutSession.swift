@@ -19,7 +19,7 @@ enum WorkoutSession {
     }
 
     static func start(_ day: DayPlan, context: ModelContext, now: Date = .now) throws {
-        guard day.status == .planned else { throw SessionError.invalidStatus }
+        guard day.status == .planned, !day.program.isArchived else { throw SessionError.invalidStatus }
         guard !day.program.days.contains(where: { $0.status == .inProgress }) else { throw SessionError.alreadyActive }
         day.startedAt = now
         try save(context)
@@ -41,7 +41,7 @@ enum WorkoutSession {
     }
 
     static func skip(_ day: DayPlan, context: ModelContext, now: Date = .now) throws {
-        guard day.status == .planned || day.status == .inProgress, !day.hasResults else {
+        guard !day.program.isArchived, day.status == .planned || day.status == .inProgress, !day.hasResults else {
             throw SessionError.invalidStatus
         }
         day.skippedAt = now
@@ -50,7 +50,7 @@ enum WorkoutSession {
     }
 
     static func reschedule(_ day: DayPlan, to date: Date, context: ModelContext, calendar: Calendar = .current) throws {
-        guard day.status == .planned, !day.hasResults else { throw SessionError.invalidStatus }
+        guard !day.program.isArchived, day.status == .planned, !day.hasResults else { throw SessionError.invalidStatus }
         guard !day.program.days.contains(where: {
             $0 !== day && $0.status != .skipped && $0.date.map { calendar.isDate($0, inSameDayAs: date) } == true
         }) else { throw SessionError.occupiedDate }
@@ -82,7 +82,7 @@ enum WorkoutSession {
     }
 
     static func setPlannedLoad(_ exercise: DayExercise, kilograms: Double, context: ModelContext) throws {
-        guard exercise.day.status == .planned, exercise.logs.isEmpty else { throw SessionError.invalidStatus }
+        guard !exercise.day.program.isArchived, exercise.day.status == .planned, exercise.logs.isEmpty else { throw SessionError.invalidStatus }
         guard kilograms.isFinite, (0...500.001).contains(kilograms) else { throw SessionError.invalidLoad }
         exercise.targetWeight = kilograms == 0 && exercise.template.equipment == "bodyweight" ? nil : kilograms
         exercise.manualTarget = true

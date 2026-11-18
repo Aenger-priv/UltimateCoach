@@ -25,9 +25,8 @@ final class FoundationTests: XCTestCase {
         }
     }
 
-    func testFailedRowingAndEmptyPhaseHistoryDoNotProgress() {
+    func testFailedRowingDoesNotProgress() {
         XCTAssertEqual(nextRowingPrescription(previous: "Zone2 26-30m", success: false), "Zone2 26-30m")
-        XCTAssertEqual(shouldSwitchPhase(history: [], currentPhase: "HYP", blockStartLoad: 60, currentLoad: 63), "HYP")
     }
 
     func testSeedIsIdempotentAndUsesSelectedStartDate() async throws {

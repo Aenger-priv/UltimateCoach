@@ -6,6 +6,28 @@ final class Program {
     var name: String
     var startDate: Date
     var totalWeeks: Int
+    var trackCode: String?
+    var deloadWeek: Int?
+    var archivedAt: Date?
+
+    var track: TrainingTrack? { trackCode.flatMap(TrainingTrack.init(rawValue:)) }
+    var isArchived: Bool { archivedAt != nil }
+    var trainingWeeks: Int { deloadWeek.map { $0 - 1 } ?? totalWeeks }
+
+    func nextStartDate(calendar: Calendar = .current) -> Date {
+        let scheduledEnd = calendar.date(byAdding: .day, value: totalWeeks * 7, to: startDate) ?? startDate
+        let lastPlannedDate = days.filter { $0.status == .planned }.compactMap(\.date).max()
+        let latestWorkoutEnd = lastPlannedDate.flatMap { calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: $0)) }
+        let recoveryEnd = days.filter(\.isDeload).compactMap(\.date).min()
+            .flatMap { calendar.date(byAdding: .day, value: 7, to: calendar.startOfDay(for: $0)) }
+        return max(scheduledEnd, latestWorkoutEnd ?? scheduledEnd, recoveryEnd ?? scheduledEnd)
+    }
+
+    func stage(now: Date, calendar: Calendar = .current) -> TrainingCycle.Stage {
+        TrainingCycle.stage(on: now, trainingEnds: calendar.date(byAdding: .day, value: trainingWeeks * 7, to: startDate) ?? startDate,
+                            cycleEnds: nextStartDate(calendar: calendar), hasDeload: deloadWeek != nil,
+                            hasActiveWorkout: days.contains { $0.status == .inProgress })
+    }
     @Relationship(deleteRule: .cascade) var days: [DayPlan]
 
     init(name: String, startDate: Date, totalWeeks: Int) {
@@ -31,6 +53,7 @@ final class DayPlan {
 
     var loggedSets: Int { exercises.reduce(0) { $0 + $1.logs.count } }
     var plannedSets: Int { exercises.reduce(0) { $0 + $1.sets } }
+    var isDeload: Bool { weekIdx == program.deloadWeek }
     var hasResults: Bool { loggedSets > 0 || conditioning?.loggedMinutes != nil }
     var activityDate: Date? {
         finishedAt ?? (exercises.flatMap(\.logs).map(\.timestamp) + [conditioning?.loggedAt].compactMap { $0 }).max()
