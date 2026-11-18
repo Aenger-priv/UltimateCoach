@@ -1,26 +1,32 @@
 import Foundation
 
-// Determines phase switch based on simple heuristics derived from requirements.
-// Returns "HYP" or "STR".
-public func shouldSwitchPhase(
-    history: [SetLog],
-    currentPhase: String,
-    blockStartLoad: Double?,
-    currentLoad: Double?
-) -> String {
-    let avgRIR = history.compactMap { $0.rir }.reduce(0, +) / max(1.0, Double(history.compactMap { $0.rir }.count))
-    if currentPhase == "HYP" {
-        if let start = blockStartLoad, let curr = currentLoad, start > 0 {
-            let gained = (curr - start) / start
-            if avgRIR <= 1.0 && gained >= 0.05 {
-                return "STR"
-            }
-        }
-        return "HYP"
-    } else {
-        // STR: if consistent misses or high RIR -> go back to HYP
-        if avgRIR > 2.0 { return "HYP" }
-        return "STR"
+// The scheduled phase advances by date. A new track takes effect only after confirmation.
+nonisolated enum TrainingCycle {
+    static let trainingWeeks = 12
+    static let deloadWeek = trainingWeeks + 1
+
+    enum Stage: Equatable {
+        case training
+        case deload
+        case readyForNextTrack
+    }
+
+    static func stage(on date: Date, trainingEnds: Date, cycleEnds: Date, hasDeload: Bool,
+                      hasActiveWorkout: Bool) -> Stage {
+        if date < trainingEnds { return .training }
+        if date < cycleEnds || hasActiveWorkout { return hasDeload ? .deload : .training }
+        return .readyForNextTrack
+    }
+
+    static func recoverySets(from sets: Int) -> Int { max(1, (sets + 1) / 2) }
+
+    static func startingLoad(previousWeight: Double, previousReps: Int, targetReps: Int) -> Double {
+        let ceiling = previousWeight * 0.9
+        let adjustedForReps = previousWeight * (30 + Double(min(12, previousReps))) / (33 + Double(targetReps))
+        return floor(min(500, ceiling, adjustedForReps) * 10) / 10
+    }
+
+    static func recoveryLoad(from weight: Double?) -> Double? {
+        weight.map { floor($0 * 0.85 * 10) / 10 }
     }
 }
-

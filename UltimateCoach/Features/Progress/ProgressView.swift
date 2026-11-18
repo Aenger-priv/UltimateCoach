@@ -2,35 +2,75 @@ import SwiftUI
 import SwiftData
 
 struct ProgressScreen: View {
-    @Environment(\.modelContext) private var context
-    @Query private var templates: [ExerciseTemplate]
+    @Query private var days: [DayPlan]
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(templates.sorted(by: { $0.name < $1.name })) { tpl in
-                    HStack {
-                        Text(tpl.name)
-                        Spacer()
-                        Text(latest1RMString(template: tpl))
-                            .foregroundStyle(.secondary)
+                let history = days.filter(\.hasResults).sorted {
+                    ($0.activityDate ?? .distantPast) > ($1.activityDate ?? .distantPast)
+                }
+                if history.isEmpty {
+                    ContentUnavailableView("No workouts logged", systemImage: "chart.line.uptrend.xyaxis",
+                                           description: Text("Your saved sets and conditioning will appear here."))
+                } else {
+                    let groups = ExerciseTrendGroup.collect(from: history)
+                    if !groups.isEmpty {
+                        Section("Exercise trends") {
+                            ForEach(groups) { group in
+                                NavigationLink {
+                                    ExerciseTrendScreen(group: group)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(group.id.name).font(.headline)
+                                        Text(group.id.equipment.capitalized)
+                                            .font(.subheadline).foregroundStyle(CoachStyle.muted)
+                                    }
+                                    .padding(.vertical, 5)
+                                }
+                                .accessibilityIdentifier("exerciseTrend_\(group.id.name)_\(group.id.equipment)")
+                            }
+                        }
+                    }
+                    Section("Workout history") {
+                        ForEach(history) { day in
+                            NavigationLink { WorkoutScreen(day: day) } label: { historyRow(day) }
+                                .accessibilityIdentifier("historyWorkout_\(day.weekIdx)_\(day.dayIdx)")
+                        }
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .coachBackground()
             .navigationTitle("Progress")
         }
     }
 
-    private func latest1RMString(template: ExerciseTemplate) -> String {
-        // Find latest log event and estimate 1RM
-        let templateID = template.persistentModelID
-        let req = FetchDescriptor<DayExercise>(
-            predicate: #Predicate<DayExercise> { $0.template.persistentModelID == templateID }
-        )
-        guard let ex = try? context.fetch(req) else { return "" }
-        let logs = ex.flatMap { $0.logs }.sorted { $0.timestamp > $1.timestamp }
-        guard let latest = logs.first, let w = latest.actualWeight else { return "" }
-        let est = epley1RM(weight: w, reps: latest.reps)
-        return String(format: "1RM: %.1f kg", est)
+    private func historyRow(_ day: DayPlan) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(day.isDeload ? "Deload · Day \(day.dayIdx)" : "Week \(day.weekIdx) · Day \(day.dayIdx)")
+                .font(.headline)
+            Text((day.program.track ?? .hypertrophy).title + " · " + historyStatus(day))
+                .font(.subheadline).foregroundStyle(CoachStyle.muted)
+            if let date = day.activityDate {
+                Text(date.formatted(date: .abbreviated, time: .omitted))
+            }
+            if day.loggedSets > 0 {
+                Text(day.loggedSets == 1 ? "1 set saved" : "\(day.loggedSets) sets saved")
+                    .font(.subheadline).foregroundStyle(CoachStyle.muted)
+            }
+            if let minutes = day.conditioning?.loggedMinutes {
+                Text("Conditioning · \(minutes) min").font(.subheadline).foregroundStyle(CoachStyle.muted)
+            }
+        }
+        .padding(.vertical, 5)
+    }
+
+    private func historyStatus(_ day: DayPlan) -> String {
+        switch day.status {
+        case .inProgress: "In progress"
+        case .finished: "Finished"
+        case .planned, .skipped: "Saved activity"
+        }
     }
 }

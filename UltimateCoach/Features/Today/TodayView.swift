@@ -2,117 +2,118 @@ import SwiftUI
 import SwiftData
 
 struct TodayView: View {
-    @Environment(\.modelContext) private var context
-    @State private var days: [DayPlan] = []
-
-    @State private var selectedExercise: DayExercise?
-    @State private var showLogger = false
-    @State private var isSeeding = false
+    @Query(sort: \DayPlan.date) private var allDays: [DayPlan]
+    @Query private var programs: [Program]
+    private var days: [DayPlan] { allDays.filter { !$0.program.isArchived } }
+    private var activeProgram: Program? { programs.first { !$0.isArchived } }
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var currentDate = Date()
+    @State private var restartFrom: Program?
 
     var body: some View {
         NavigationStack {
-            List {
-                if let day = todayDay {
-                    Section(header: Text("Week \(day.weekIdx) · Day \(day.dayIdx)")) {
-                        ForEach(exercises(for: day), id: \.persistentModelID) { ex in
-                            ExerciseCardView(exercise: ex) {
-                                selectedExercise = ex
-                                showLogger = true
-                            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text(currentDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(CoachStyle.muted)
+                    if let active = days.first(where: { $0.status == .inProgress }) {
+                        workoutCard(active, eyebrow: "IN PROGRESS", action: "Resume workout")
+                    } else if let program = activeProgram, program.stage(now: currentDate) == .readyForNextTrack {
+                        CycleActions(program: program, now: currentDate).coachCard()
+                    } else if let today = days.first(where: isToday) {
+                        workoutCard(today, eyebrow: today.status == .finished ? "SESSION SAVED" : "ON THE SCHEDULE",
+                                    action: today.status == .finished ? "View workout" : "Open workout")
+                    } else if let next = nextWorkout {
+                        Text("Rest day").font(.title2.bold()).accessibilityAddTraits(.isHeader)
+                        workoutCard(next, eyebrow: "UP NEXT", action: "Preview workout")
+                    } else if activeProgram == nil, let archived = Program.latestArchived(in: programs) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Ready for a new program").font(.title2.bold())
+                            Text("Your saved workouts are in Progress.").foregroundStyle(CoachStyle.muted)
+                            Button("Choose next track", systemImage: "arrow.right") { restartFrom = archived }
+                                .buttonStyle(CoachActionStyle())
                         }
-                        if let cond = day.conditioning {
-                            ConditioningCardView(conditioning: cond)
-                        }
-                    }
-                } else {
-                    if isSeeding {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                            Text("Seeding…")
-                                .foregroundStyle(.secondary)
-                        }
+                        .coachCard()
                     } else {
-                        Text("Loading program…")
-                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("No upcoming workouts").font(.title2.bold())
+                            Text("Open Program to review your schedule and revisit missed workouts.")
+                                .foregroundStyle(CoachStyle.muted)
+                        }
+                        .coachCard()
+                    }
+                    if !laterWorkouts.isEmpty {
+                        Text("Coming up").font(.title3.bold()).accessibilityAddTraits(.isHeader)
+                        ForEach(laterWorkouts) { day in
+                            NavigationLink {
+                                WorkoutScreen(day: day)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(day.isDeload ? "Deload · Day \(day.dayIdx)" : "Week \(day.weekIdx) · Day \(day.dayIdx)").font(.headline)
+                                        if let date = day.date {
+                                            Text(date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                                                .font(.subheadline).foregroundStyle(CoachStyle.muted)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                                        .foregroundStyle(CoachStyle.muted).accessibilityHidden(true)
+                                }
+                                .coachCard()
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
+                .coachPage()
             }
+            .coachBackground()
             .navigationTitle("Today")
-            .task {
-                await loadDays()
-                if days.isEmpty {
-                    isSeeding = true
-                    await SeedData.seedIfNeeded(context: context)
-                    try? context.save()
-                    isSeeding = false
-                    await loadDays()
-                    if days.isEmpty {
-                        // Emergency minimal seed to avoid empty UI
-                        await emergencySeed()
-                        await loadDays()
-                    }
-                } else {
-                    // If we have days but no exercises on current week/day, try to backfill from seed
-                    if (todayDay?.exercises.isEmpty ?? true) {
-                        await SeedData.fillMissingExercisesIfNeeded(context: context)
-                        await loadDays()
-                    }
-                }
+            .sheet(item: $restartFrom) { StartDateSetupView(previous: $0) }
+            .onChange(of: scenePhase) { _, phase in if phase == .active { currentDate = Date() } }
+        }
+    }
+
+    private func workoutCard(_ day: DayPlan, eyebrow: String, action: String) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(eyebrow, systemImage: "bolt.fill")
+                .font(.caption.weight(.bold)).tracking(1)
+                .foregroundStyle(CoachStyle.accent)
+            Text(day.isDeload ? "Deload · Day \(day.dayIdx)" : "Week \(day.weekIdx) · Day \(day.dayIdx)")
+                .font(.title.weight(.bold)).accessibilityAddTraits(.isHeader)
+            if let date = day.date, !Calendar.current.isDate(date, inSameDayAs: currentDate) {
+                Text(date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                    .foregroundStyle(CoachStyle.muted)
             }
-            .sheet(isPresented: $showLogger) {
-                if let ex = selectedExercise {
-                    LoggerSheetView(exercise: ex)
-                        .presentationDetents([.height(320), .medium])
-                }
+            Text("\(day.exercises.count) exercises · \(day.plannedSets) sets")
+                .foregroundStyle(CoachStyle.muted)
+            if day.status == .inProgress, day.plannedSets > 0 {
+                ProgressView(value: min(Double(day.loggedSets) / Double(day.plannedSets), 1))
+                    .accessibilityLabel("Workout progress")
+                    .accessibilityValue("\(day.loggedSets) of \(day.plannedSets) sets saved")
             }
+            NavigationLink { WorkoutScreen(day: day) } label: {
+                Label(action, systemImage: "arrow.right")
+            }
+            .buttonStyle(CoachActionStyle())
         }
+        .coachCard()
     }
 
-    private var todayDay: DayPlan? {
-        // 1) Exact date match
-        let today = Calendar.current.startOfDay(for: Date())
-        if let match = days.first(where: { $0.date == today }) { return match }
-        // 2) Next upcoming by date
-        if let upcoming = days.filter({ ($0.date ?? .distantFuture) >= today })
-            .sorted(by: { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) })
-            .first { return upcoming }
-        // 3) Earliest day (Week, Day order)
-        if let earliest = days.sorted(by: { ($0.weekIdx, $0.dayIdx) < ($1.weekIdx, $1.dayIdx) }).first { return earliest }
-        // 4) Most recent past by date
-        return days.sorted(by: { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }).first
-    }
-}
-extension TodayView {
-    @MainActor private func loadDays() async {
-        do {
-            let desc = FetchDescriptor<DayPlan>(sortBy: [SortDescriptor(\.weekIdx), SortDescriptor(\.dayIdx)])
-            days = try context.fetch(desc)
-        } catch {
-            print("Load days error: \(error)")
-        }
+    private func isToday(_ day: DayPlan) -> Bool {
+        day.status != .skipped && day.date.map { Calendar.current.isDate($0, inSameDayAs: currentDate) } == true
     }
 
-    @MainActor private func exercises(for day: DayPlan) -> [DayExercise] {
-        return day.exercises.sorted { $0.orderIdx < $1.orderIdx }
+    private var upcoming: [DayPlan] {
+        days.filter { $0.status == .planned && ($0.date ?? .distantPast) > currentDate }
     }
 
-    @MainActor private func emergencySeed() async {
-        let start = Calendar.current.startOfDay(for: Date())
-        let program = Program(name: "Default Program", startDate: start, totalWeeks: 12)
-        context.insert(program)
-        let day = DayPlan(program: program, weekIdx: 1, dayIdx: 1)
-        day.date = SeedData.computeDate(start: start, weekIdx: 1, dayIdx: 1)
-        context.insert(day)
-        program.days.append(day)
-        let bench = ExerciseTemplate(name: "Bench Press", muscleGroup: "chest", equipment: "barbell", defaultSets: 3, repMin: 8, repMax: 12, restSec: 120)
-        context.insert(bench)
-        let ex = DayExercise(day: day, template: bench, targetWeight: 60, targetRepsMin: 8, targetRepsMax: 12, sets: 3, orderIdx: 0, phase: "HYP")
-        context.insert(ex)
-        day.exercises.append(ex)
-        do {
-            try context.save()
-        } catch {
-            print("Emergency seed save error: \(error)")
-        }
+    private var nextWorkout: DayPlan? { upcoming.first }
+
+    private var laterWorkouts: [DayPlan] {
+        let hasCurrentWorkout = days.contains { $0.status == .inProgress || isToday($0) }
+        return Array(upcoming.dropFirst(hasCurrentWorkout ? 0 : 1).prefix(2))
     }
 }

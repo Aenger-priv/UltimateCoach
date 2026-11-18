@@ -2,14 +2,14 @@ import Foundation
 
 // Simple parser for patterns like "6x500m/90s" or "Tabata 8x20/10" or "Zone2 25-30m".
 public func nextRowingPrescription(previous: String, success: Bool) -> String {
-    // If Zone 2, progress duration up to 30m
-    if previous.lowercased().contains("zone") {
-        if let minutes = extractFirstInt(previous) {
-            if minutes < 30 {
-                return previous.replacingOccurrences(of: "\(minutes)", with: "\(min(30, minutes + 2))")
-            }
-        }
-        return previous
+    guard success else { return previous }
+    // Parse duration after the zone label; never replace the zone number itself.
+    if previous.lowercased().hasPrefix("zone2 ") {
+        let prefix = String(previous.prefix(6))
+        let duration = String(previous.dropFirst(6))
+        let digits = duration.prefix(while: { $0.isNumber })
+        guard let minutes = Int(digits), minutes < 30 else { return previous }
+        return prefix + String(min(30, minutes + 2)) + duration.dropFirst(digits.count)
     }
 
     // Intervals NxDist/Rest -> add one repeat before pace bump
@@ -17,11 +17,6 @@ public func nextRowingPrescription(previous: String, success: Bool) -> String {
         return "\(n + 1)x\(tail)"
     }
     return previous
-}
-
-private func extractFirstInt(_ s: String) -> Int? {
-    let nums = s.split(whereSeparator: { !$0.isNumber })
-    return nums.first.flatMap { Int($0) }
 }
 
 private func splitLeadingNumber(before token: Character, in s: String) -> (Int, String)? {

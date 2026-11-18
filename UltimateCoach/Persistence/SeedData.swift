@@ -1,20 +1,21 @@
 import Foundation
 import SwiftData
 
-struct SeedData {
-    static var lastStatus: String = ""
-    struct SeedConfig: Codable {
+@MainActor
+enum SeedData {
+    struct SeedConfig: Decodable {
         let programName: String
         let totalWeeks: Int
-        let startDateISO8601: String
         let dayTemplates: [DayTemplate]
     }
-    struct DayTemplate: Codable {
+
+    struct DayTemplate: Decodable {
         let dayIdx: Int
         let exercises: [ExerciseSpec]
         let conditioning: ConditioningSpec?
     }
-    struct ExerciseSpec: Codable {
+
+    struct ExerciseSpec: Decodable {
         let name: String
         let muscleGroup: String
         let equipment: String
@@ -25,7 +26,8 @@ struct SeedData {
         let tempo: String?
         let targetWeight: Double?
     }
-    struct ConditioningSpec: Codable {
+
+    struct ConditioningSpec: Decodable {
         let type: String
         let protocolText: String
         let targetZone: String?
@@ -33,278 +35,212 @@ struct SeedData {
         let durationMin: Int?
     }
 
-    @MainActor static func seedIfNeeded(context: ModelContext, overrideStartDate: Date? = nil) async {
-        let dayFetch = FetchDescriptor<DayPlan>(predicate: #Predicate<DayPlan> { _ in true })
-        if let count = try? context.fetchCount(dayFetch), count > 0 {
-            Self.lastStatus = "Seed skipped: existing days=\(count)"
-            return
-        }
-        let existingProgram = (try? context.fetch(FetchDescriptor<Program>()))?.first
+    enum CycleError: LocalizedError {
+        case cycleInProgress, startDateTooEarly, alreadyArchived
 
-        // Load embedded seed if bundle resource missing
-        let data: Data
-        if let url = Bundle.main.url(forResource: "program_seed", withExtension: "json") {
-            if let d = try? Data(contentsOf: url) {
-                data = d
-                Self.lastStatus = "Using bundled JSON"
-            } else {
-                data = Data(embeddedSeedJSON.utf8)
-                Self.lastStatus = "Bundled JSON unreadable; using embedded"
-            }
-        } else {
-            data = Data(embeddedSeedJSON.utf8)
-            Self.lastStatus = "No bundled JSON; using embedded"
-        }
-        do {
-            let decoder = JSONDecoder()
-            let cfg = try decoder.decode(SeedConfig.self, from: data)
-            
-            let start = Calendar.current.startOfDay(for: overrideStartDate ?? (existingProgram?.startDate ?? (ISO8601DateFormatter().date(from: cfg.startDateISO8601) ?? Date())))
-            let program: Program
-            if let p = existingProgram {
-                program = p
-                program.startDate = start
-            } else {
-                program = Program(name: cfg.programName, startDate: start, totalWeeks: cfg.totalWeeks)
-                context.insert(program)
-            }
-            
-            var insertedDaysCount = 0
-
-            var templatesByName: [String: ExerciseTemplate] = [:]
-
-            for week in 1...program.totalWeeks {
-                for dayTpl in cfg.dayTemplates.sorted(by: { $0.dayIdx < $1.dayIdx }) {
-                    let day = DayPlan(program: program, weekIdx: week, dayIdx: dayTpl.dayIdx)
-                    day.date = computeDate(start: start, weekIdx: week, dayIdx: dayTpl.dayIdx)
-                    context.insert(day)
-                    program.days.append(day)
-                    insertedDaysCount += 1
-                    // Exercises
-                    var order = 0
-                    for ex in dayTpl.exercises {
-                        let tpl: ExerciseTemplate
-                        if let existing = templatesByName[ex.name] {
-                            tpl = existing
-                        } else {
-                            tpl = ExerciseTemplate(
-                                name: ex.name,
-                                muscleGroup: ex.muscleGroup,
-                                equipment: ex.equipment,
-                                defaultSets: ex.sets,
-                                repMin: ex.repMin,
-                                repMax: ex.repMax,
-                                restSec: ex.restSec,
-                                tempo: ex.tempo,
-                                phaseMode: "AUTO"
-                            )
-                            templatesByName[ex.name] = tpl
-                            context.insert(tpl)
-                        }
-                        let dayEx = DayExercise(
-                            day: day,
-                            template: tpl,
-                            targetWeight: ex.targetWeight,
-                            targetRepsMin: ex.repMin,
-                            targetRepsMax: ex.repMax,
-                            sets: ex.sets,
-                            orderIdx: order,
-                            phase: "HYP"
-                        )
-                        context.insert(dayEx)
-                        day.exercises.append(dayEx)
-                        order += 1
-                    }
-                    if let c = dayTpl.conditioning {
-                        let cond = Conditioning(
-                            day: day,
-                            type: c.type,
-                            protocolText: c.protocolText,
-                            targetZone: c.targetZone,
-                            targetPace: c.targetPace,
-                            durationMin: c.durationMin
-                        )
-                        context.insert(cond)
-                        day.conditioning = cond
-                    }
-                }
-            }
-            
-            if insertedDaysCount == 0 {
-                // Fallback if JSON had no day templates: create a minimal day 1
-                let day = DayPlan(program: program, weekIdx: 1, dayIdx: 1)
-                day.date = computeDate(start: start, weekIdx: 1, dayIdx: 1)
-                context.insert(day)
-                program.days.append(day)
-                let bench = ExerciseTemplate(
-                    name: "Bench Press",
-                    muscleGroup: "chest",
-                    equipment: "barbell",
-                    defaultSets: 3,
-                    repMin: 8,
-                    repMax: 12,
-                    restSec: 120
-                )
-                context.insert(bench)
-                let ex = DayExercise(
-                    day: day,
-                    template: bench,
-                    targetWeight: 60,
-                    targetRepsMin: 8,
-                    targetRepsMax: 12,
-                    sets: 3,
-                    orderIdx: 0,
-                    phase: "HYP"
-                )
-                context.insert(ex)
-                day.exercises.append(ex)
-            }
-
-            do {
-                try context.save()
-                Self.lastStatus = "Seed OK: program=\(program.name), weeks=\(program.totalWeeks)"
-            } catch {
-                Self.lastStatus = "Seed save error: \(error.localizedDescription)"
-                throw error
-            }
-        } catch {
-            print("Seed error: \(error)")
-            Self.lastStatus = "Seed error: \(error.localizedDescription)"
-            // Fallback: create a minimal default program/day if JSON decoding failed
-            let start = Calendar.current.startOfDay(for: overrideStartDate ?? Date())
-            let program: Program
-            if let p = (try? context.fetch(FetchDescriptor<Program>()))?.first {
-                program = p
-                program.startDate = start
-            } else {
-                program = Program(name: "Default Program", startDate: start, totalWeeks: 12)
-                context.insert(program)
-            }
-            let day = DayPlan(program: program, weekIdx: 1, dayIdx: 1)
-            day.date = computeDate(start: start, weekIdx: 1, dayIdx: 1)
-            context.insert(day)
-            let bench = ExerciseTemplate(name: "Bench Press", muscleGroup: "chest", equipment: "barbell", defaultSets: 3, repMin: 8, repMax: 12, restSec: 120)
-            context.insert(bench)
-            let ex = DayExercise(day: day, template: bench, targetWeight: 60, targetRepsMin: 8, targetRepsMax: 12, sets: 3, orderIdx: 0, phase: "HYP")
-            context.insert(ex)
-            do {
-                try context.save()
-                Self.lastStatus += " | Fallback seed OK"
-            } catch {
-                print("Seed save error (catch fallback): \(error)")
-                Self.lastStatus += " | Fallback save error: \(error.localizedDescription)"
+        var errorDescription: String? {
+            switch self {
+            case .cycleInProgress: "Finish the current cycle and any active workout first."
+            case .startDateTooEarly: "Choose a start date after your current cycle."
+            case .alreadyArchived: "This program has already ended."
             }
         }
     }
 
-    @MainActor static func fillMissingExercisesIfNeeded(context: ModelContext) async {
-        // Find any days without exercises and populate from seed template for that dayIdx
-        do {
-            let days = try context.fetch(FetchDescriptor<DayPlan>())
-            guard days.contains(where: { $0.exercises.isEmpty }) else {
-                return
-            }
-            // Load seed templates
-            let data: Data
-            if let url = Bundle.main.url(forResource: "program_seed", withExtension: "json"), let d = try? Data(contentsOf: url) {
-                data = d
-            } else {
-                data = Data(embeddedSeedJSON.utf8)
-            }
-            let cfg = try JSONDecoder().decode(SeedConfig.self, from: data)
-            // Map name->template to reuse
-            var templatesByName: [String: ExerciseTemplate] = Dictionary(uniqueKeysWithValues: (try context.fetch(FetchDescriptor<ExerciseTemplate>())).map { ($0.name, $0) })
+    // Retained for testing the original 12-week template and reading existing installs.
+    static func seedIfNeeded(context: ModelContext, overrideStartDate: Date? = nil) async throws {
+        guard try context.fetchCount(FetchDescriptor<Program>()) == 0 else { return }
+        let config = try load("program_seed")
+        _ = try save(context) {
+            makeProgram(config, track: nil, starts: overrideStartDate ?? .now, previous: nil, context: context)
+        }
+    }
 
-            for day in days where day.exercises.isEmpty {
-                if let dayTpl = cfg.dayTemplates.first(where: { $0.dayIdx == day.dayIdx }) {
-                    var order = 0
-                    for ex in dayTpl.exercises {
-                        let tpl: ExerciseTemplate
-                        if let existing = templatesByName[ex.name] {
-                            tpl = existing
-                        } else {
-                            tpl = ExerciseTemplate(name: ex.name, muscleGroup: ex.muscleGroup, equipment: ex.equipment, defaultSets: ex.sets, repMin: ex.repMin, repMax: ex.repMax, restSec: ex.restSec, tempo: ex.tempo, phaseMode: "AUTO")
-                            context.insert(tpl)
-                            templatesByName[ex.name] = tpl
-                        }
-                        let dayEx = DayExercise(day: day, template: tpl, targetWeight: ex.targetWeight, targetRepsMin: ex.repMin, targetRepsMax: ex.repMax, sets: ex.sets, orderIdx: order, phase: "HYP")
-                        context.insert(dayEx)
-                        day.exercises.append(dayEx)
-                        order += 1
+    @discardableResult
+    static func startCycle(_ track: TrainingTrack, starts: Date, context: ModelContext,
+                           now: Date = .now, calendar: Calendar = .current) throws -> Program {
+        let programs = try context.fetch(FetchDescriptor<Program>())
+        let previous = programs.first { !$0.isArchived }
+        let start = calendar.startOfDay(for: starts)
+        if let previous {
+            guard previous.stage(now: now, calendar: calendar) == .readyForNextTrack else {
+                throw CycleError.cycleInProgress
+            }
+            guard start >= previous.nextStartDate(calendar: calendar) else { throw CycleError.startDateTooEarly }
+        } else if let endedAt = Program.latestArchived(in: programs)?.archivedAt,
+                  start < calendar.startOfDay(for: endedAt) {
+            throw CycleError.startDateTooEarly
+        }
+        let config = try load(track == .hypertrophy ? "hypertrophy_seed" : "strength_seed")
+        return try save(context) {
+            previous?.archivedAt = now
+            return makeProgram(config, track: track, starts: start, previous: previous, context: context, calendar: calendar)
+        }
+    }
+
+    static func endCycleEarly(_ program: Program, context: ModelContext, now: Date = .now) throws {
+        guard !program.isArchived else { throw CycleError.alreadyArchived }
+        try save(context) {
+            for day in program.days where day.status == .inProgress {
+                if day.hasResults {
+                    // Date the partial session by the work performed, even if the program ends weeks later.
+                    day.finishedAt = day.activityDate ?? day.startedAt ?? now
+                } else {
+                    day.startedAt = nil
+                }
+                day.restUntil = nil
+            }
+            program.archivedAt = now
+        }
+    }
+
+    static func addRecoveryToLegacy(_ program: Program, context: ModelContext, now: Date = .now,
+                                    calendar: Calendar = .current) throws {
+        guard !program.isArchived, program.deloadWeek == nil,
+              program.stage(now: now, calendar: calendar) == .readyForNextTrack else {
+            throw CycleError.cycleInProgress
+        }
+        let anchor = calendar.startOfDay(for: now)
+        try save(context) {
+            addRecoveryWeek(to: program, anchor: anchor, context: context, calendar: calendar)
+        }
+    }
+
+    private static func load(_ resource: String) throws -> SeedConfig {
+        guard let url = Bundle.main.url(forResource: resource, withExtension: "json") else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        let config = try JSONDecoder().decode(SeedConfig.self, from: Data(contentsOf: url))
+        guard config.totalWeeks > 0, !config.dayTemplates.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
+        return config
+    }
+
+    @discardableResult
+    private static func makeProgram(_ config: SeedConfig, track: TrainingTrack?, starts: Date, previous: Program?,
+                                    context: ModelContext, calendar: Calendar = .current) -> Program {
+        let start = calendar.startOfDay(for: starts)
+        let program = Program(name: config.programName, startDate: start, totalWeeks: config.totalWeeks)
+        program.trackCode = track?.rawValue
+        context.insert(program)
+        var templates: [String: ExerciseTemplate] = [:]
+        let recent = recentWeights(in: previous)
+
+        for week in 1...config.totalWeeks {
+            for spec in config.dayTemplates.sorted(by: { $0.dayIdx < $1.dayIdx }) {
+                let date = computeDate(start: start, weekIdx: week, dayIdx: spec.dayIdx, calendar: calendar)
+                let day = makeDay(program, week: week, slot: spec.dayIdx, date: date, context: context)
+                for (index, ex) in spec.exercises.enumerated() {
+                    let template = templates[ex.name] ?? ExerciseTemplate(
+                        name: ex.name, muscleGroup: ex.muscleGroup, equipment: ex.equipment,
+                        defaultSets: ex.sets, repMin: ex.repMin, repMax: ex.repMax,
+                        restSec: ex.restSec, tempo: ex.tempo
+                    )
+                    if templates[ex.name] == nil {
+                        context.insert(template)
+                        templates[ex.name] = template
                     }
-                    if day.conditioning == nil, let c = dayTpl.conditioning {
-                        let cond = Conditioning(day: day, type: c.type, protocolText: c.protocolText, targetZone: c.targetZone, targetPace: c.targetPace, durationMin: c.durationMin)
-                        context.insert(cond)
-                        day.conditioning = cond
+                    let priorWeight = recent[ExerciseKey(name: ex.name, equipment: ex.equipment)]
+                    let carryover = priorWeight.map { previous in
+                        TrainingCycle.startingLoad(previousWeight: previous.weight, previousReps: previous.reps, targetReps: ex.repMin)
                     }
+                    let exercise = DayExercise(day: day, template: template, targetWeight: carryover ?? ex.targetWeight,
+                        targetRepsMin: ex.repMin, targetRepsMax: ex.repMax, sets: ex.sets,
+                        orderIdx: index, phase: track?.phase ?? "HYP")
+                    if track != nil { exercise.plannedRestSeconds = ex.restSec }
+                    if week == 1, carryover != nil {
+                        exercise.targetNote = "Starts lighter than your last completed workout with this lift. Adjust as needed."
+                    }
+                    insert(exercise, into: day, context: context)
+                }
+                if let c = spec.conditioning {
+                    let conditioning = Conditioning(day: day, type: c.type, protocolText: c.protocolText,
+                        targetZone: c.targetZone, targetPace: c.targetPace, durationMin: c.durationMin)
+                    context.insert(conditioning)
+                    day.conditioning = conditioning
                 }
             }
+        }
+        if track != nil { addRecoveryWeek(to: program, anchor: nil, context: context, calendar: calendar) }
+        return program
+    }
+
+    private static func addRecoveryWeek(to program: Program, anchor: Date?, context: ModelContext, calendar: Calendar) {
+        let finalWeek = program.totalWeeks
+        let week = finalWeek + 1
+        let start = anchor ?? computeDate(start: program.startDate, weekIdx: week, dayIdx: 1, calendar: calendar)
+        program.totalWeeks = week
+        program.deloadWeek = week
+        let finalDays = program.days.filter { $0.weekIdx == finalWeek }
+        for final in finalDays {
+            let date = computeDate(start: start, weekIdx: 1, dayIdx: final.dayIdx, calendar: calendar)
+            let day = makeDay(program, week: week, slot: final.dayIdx, date: date, context: context)
+            for source in final.exercises {
+                let completed = source.logs.count == source.sets ? source.logs.compactMap(\.actualWeight).min() : nil
+                let reference = source.targetWeight.map { min($0, completed ?? $0) }
+                let exercise = DayExercise(day: day, template: source.template, targetWeight: TrainingCycle.recoveryLoad(from: reference),
+                    targetRepsMin: source.targetRepsMin, targetRepsMax: source.targetRepsMin,
+                    sets: TrainingCycle.recoverySets(from: source.sets), orderIdx: source.orderIdx, phase: source.phase)
+                exercise.plannedRestSeconds = source.plannedRestSeconds
+                insert(exercise, into: day, context: context)
+            }
+        }
+    }
+
+    private static func makeDay(_ program: Program, week: Int, slot: Int, date: Date, context: ModelContext) -> DayPlan {
+        let day = DayPlan(program: program, weekIdx: week, dayIdx: slot)
+        day.date = date
+        context.insert(day)
+        program.days.append(day)
+        return day
+    }
+
+    private static func insert(_ exercise: DayExercise, into day: DayPlan, context: ModelContext) {
+        context.insert(exercise)
+        day.exercises.append(exercise)
+    }
+
+    private struct ExerciseKey: Hashable {
+        var name: String
+        var equipment: String
+    }
+
+    private struct PreviousSet {
+        let date: Date
+        let weight: Double
+        let reps: Int
+    }
+
+    private static func recentWeights(in program: Program?) -> [ExerciseKey: PreviousSet] {
+        var mostRecent: [ExerciseKey: PreviousSet] = [:]
+        for day in program?.days ?? [] where !day.isDeload {
+            for exercise in day.exercises where exercise.logs.count == exercise.sets && exercise.template.equipment != "bodyweight" {
+                guard let weight = exercise.logs.compactMap(\.actualWeight).min(), weight > 0,
+                      let reps = exercise.logs.map(\.reps).min(),
+                      let date = exercise.logs.map(\.timestamp).max() else { continue }
+                let key = ExerciseKey(name: exercise.template.name, equipment: exercise.template.equipment)
+                if let existing = mostRecent[key],
+                   date < existing.date || (date == existing.date && (weight, reps) >= (existing.weight, existing.reps)) { continue }
+                mostRecent[key] = PreviousSet(date: date, weight: weight, reps: reps)
+            }
+        }
+        return mostRecent
+    }
+
+    private static func save<T>(_ context: ModelContext, changes: () -> T) throws -> T {
+        let autosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = autosave }
+        do {
+            let value = changes()
             try context.save()
-            Self.lastStatus = (Self.lastStatus + " | Filled missing exercises")
+            return value
         } catch {
-            print("fillMissingExercisesIfNeeded error: \(error)")
-            Self.lastStatus = (Self.lastStatus + " | Fill error: \(error.localizedDescription)")
+            context.rollback()
+            throw error
         }
     }
 
-    // Day index is treated as day-of-week offset relative to program start date.
-    // Example: dayIdx 1 = startDate, 2 = +1 day, 5 = +4 days.
-    static func computeDate(start: Date, weekIdx: Int, dayIdx: Int) -> Date {
-        let cal = Calendar.current
-        let base = cal.date(byAdding: .day, value: (weekIdx - 1) * 7, to: start) ?? start
-        return cal.date(byAdding: .day, value: max(0, dayIdx - 1), to: base) ?? base
+    static func computeDate(start: Date, weekIdx: Int, dayIdx: Int, calendar: Calendar = .current) -> Date {
+        calendar.date(byAdding: .day, value: (weekIdx - 1) * 7 + max(0, dayIdx - 1), to: start) ?? start
     }
 }
-
-private let embeddedSeedJSON = """
-{
-  "programName": "12 Week Strength+Hypertrophy",
-  "totalWeeks": 12,
-  "startDateISO8601": "2025-01-06T08:00:00Z",
-  "dayTemplates": [
-    {
-      "dayIdx": 1,
-      "exercises": [
-        {"name": "Bench Press", "muscleGroup": "chest", "equipment": "barbell", "sets": 4, "repMin": 8, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": 60.0},
-        {"name": "Overhead Press", "muscleGroup": "shoulders", "equipment": "barbell", "sets": 3, "repMin": 8, "repMax": 10, "restSec": 120, "tempo": null, "targetWeight": 35.0},
-        {"name": "Incline DB Press", "muscleGroup": "chest", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": 20.0},
-        {"name": "DB Curl", "muscleGroup": "biceps", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 90, "tempo": null, "targetWeight": 12.5},
-        {"name": "Dips", "muscleGroup": "triceps", "equipment": "bodyweight", "sets": 3, "repMin": 8, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": null}
-      ],
-      "conditioning": {"type": "row", "protocolText": "6x500m/90s", "targetZone": null, "targetPace": null, "durationMin": null}
-    },
-    {
-      "dayIdx": 2,
-      "exercises": [
-        {"name": "Back Squat", "muscleGroup": "legs", "equipment": "barbell", "sets": 4, "repMin": 6, "repMax": 10, "restSec": 180, "tempo": null, "targetWeight": 80.0},
-        {"name": "Romanian Deadlift", "muscleGroup": "hamstrings", "equipment": "barbell", "sets": 3, "repMin": 8, "repMax": 10, "restSec": 150, "tempo": null, "targetWeight": 70.0},
-        {"name": "Bulgarian Split Squat", "muscleGroup": "legs", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": 20.0}
-      ],
-      "conditioning": {"type": "row", "protocolText": "Zone2 25-30m", "targetZone": "Z2", "targetPace": null, "durationMin": 25}
-    },
-    {
-      "dayIdx": 3,
-      "exercises": [
-        {"name": "Pull-Ups", "muscleGroup": "back", "equipment": "bodyweight", "sets": 4, "repMin": 6, "repMax": 10, "restSec": 120, "tempo": null, "targetWeight": null},
-        {"name": "Barbell Row", "muscleGroup": "back", "equipment": "barbell", "sets": 3, "repMin": 8, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": 60.0},
-        {"name": "Chin-Ups", "muscleGroup": "back", "equipment": "bodyweight", "sets": 3, "repMin": 6, "repMax": 10, "restSec": 120, "tempo": null, "targetWeight": null},
-        {"name": "Incline DB Curl", "muscleGroup": "biceps", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 90, "tempo": null, "targetWeight": 12.5},
-        {"name": "Overhead Triceps Extension", "muscleGroup": "triceps", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 90, "tempo": null, "targetWeight": 15.0}
-      ],
-      "conditioning": {"type": "row", "protocolText": "Tabata 8x20/10", "targetZone": null, "targetPace": null, "durationMin": null}
-    },
-    {
-      "dayIdx": 5,
-      "exercises": [
-        {"name": "Incline DB Press", "muscleGroup": "chest", "equipment": "dumbbell", "sets": 3, "repMin": 8, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": 22.5},
-        {"name": "One-Arm Row", "muscleGroup": "back", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": 25.0},
-        {"name": "Lateral Raise", "muscleGroup": "shoulders", "equipment": "dumbbell", "sets": 3, "repMin": 12, "repMax": 15, "restSec": 90, "tempo": null, "targetWeight": 7.5},
-        {"name": "Chin-Ups", "muscleGroup": "back", "equipment": "bodyweight", "sets": 3, "repMin": 6, "repMax": 10, "restSec": 120, "tempo": null, "targetWeight": null},
-        {"name": "Hammer Curl", "muscleGroup": "biceps", "equipment": "dumbbell", "sets": 3, "repMin": 10, "repMax": 12, "restSec": 90, "tempo": null, "targetWeight": 12.5},
-        {"name": "Dips", "muscleGroup": "triceps", "equipment": "bodyweight", "sets": 3, "repMin": 8, "repMax": 12, "restSec": 120, "tempo": null, "targetWeight": null}
-      ],
-      "conditioning": {"type": "row", "protocolText": "20m progressive", "targetZone": "Z2", "targetPace": null, "durationMin": 20}
-    }
-  ]
-}
-"""

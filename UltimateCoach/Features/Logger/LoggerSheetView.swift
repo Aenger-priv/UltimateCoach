@@ -1,124 +1,225 @@
 import SwiftUI
 import SwiftData
-import Observation
 
 struct LoggerSheetView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
-    @Bindable var exercise: DayExercise
+    @Environment(\.locale) private var locale
+    @AppStorage("units_kg") private var unitsKg = true
+    @AppStorage("barbell_inc") private var barbellInc = 2.5
+    @AppStorage("db_inc") private var dbInc = 2.0
+    @AppStorage("enable_rir") private var enableRIR = true
+    let exercise: DayExercise
+    @State private var weightText = ""
+    @State private var reps = 8
+    @State private var rir = 2.0
+    @State private var recordEffort = false
+    @State private var nextTarget: Target?
+    @State private var errorMessage: String?
+    @State private var editing: ExerciseLog?
+    @State private var scrollTarget: String?
+    @FocusState private var weightFocused: Bool
 
-    @AppStorage("units_kg") private var unitsKg: Bool = true
-    @AppStorage("barbell_inc") private var barbellInc: Double = 2.5
-    @AppStorage("db_inc") private var dbInc: Double = 2.0
-    @AppStorage("enable_rir") private var enableRIR: Bool = true
-
-    @State private var weight: Double = 0
-    @State private var reps: Int = 8
-    @State private var rir: Double = 2
-    @State private var setIdx: Int = 1
-    @State private var showNextTargets: Target? = nil
-    @State private var showTimer = false
-    @State private var rest: Int = 90
+    private var canLog: Bool { exercise.day.status == .inProgress && exercise.logs.count < exercise.sets }
+    private var increment: Double { exercise.template.equipment == "barbell" ? barbellInc : dbInc }
+    private var sortedLogs: [ExerciseLog] { exercise.logs.sorted { $0.setIdx < $1.setIdx } }
 
     var body: some View {
-        VStack(spacing: 12) {
-            Text(exercise.template.name).font(.headline)
-            HStack(spacing: 12) {
-                Stepper(value: $weight, in: 0...500, step: inc) { Text("Weight: \(displayWeight(weight))") }
-                Stepper(value: $reps, in: 1...30, step: 1) { Text("Reps: \(reps)") }
-                if enableRIR {
-                    Stepper(value: $rir, in: 0...6, step: 0.5) { Text("RIR: \(rir, specifier: "%.1f")") }
+        NavigationStack {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    content
+                }
+                .onChange(of: scrollTarget) { _, target in
+                    if let target { proxy.scrollTo(target, anchor: .top) }
+                    scrollTarget = nil
                 }
             }
-            .font(.body)
-
-            HStack {
-                Button("Save Set", systemImage: "checkmark.circle.fill") { saveSet() }
-                    .buttonStyle(.borderedProminent)
-                Button("Done", systemImage: "xmark.circle") { dismiss() }
+            .coachBackground()
+            .navigationTitle("Set log")
+            .navigationBarTitleDisplayMode(.inline)
+            .scrollDismissesKeyboard(.interactively)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
-
-            if let t = showNextTargets {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("Next targets", systemImage: "arrow.right.circle")
-                        .font(.subheadline.bold())
-                    Text(nextTargetSummary(t))
-                        .font(.footnote)
-                }
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .transition(.opacity)
-            }
-
-            if showTimer { RestTimer(seconds: rest) }
-        }
-        .padding()
-        .onAppear {
-            setIdx = exercise.logs.count + 1
-            weight = exercise.targetWeight ?? 0
-            reps = max(exercise.targetRepsMin, min(exercise.targetRepsMax, 8))
-            rest = exercise.template.restSec
+            .safeAreaInset(edge: .bottom) { saveBar }
+            .alert("Could not save", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+                Button("OK") { errorMessage = nil }
+            } message: { Text(errorMessage ?? "") }
+            .onAppear { fill(from: sortedLogs.last) }
         }
     }
 
-    private var inc: Double { exercise.template.equipment == "barbell" ? barbellInc : dbInc }
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 9) {
+                Text(exercise.template.name).font(.title2.bold()).accessibilityAddTraits(.isHeader)
+                Text("Target").font(.subheadline.weight(.semibold)).foregroundStyle(CoachStyle.accent)
+                Text("\(exercise.sets) sets of \(exercise.targetRepsMin)–\(exercise.targetRepsMax) reps")
+                Text(exercise.targetWeight.map { WeightUnit.formatted($0, useKilograms: unitsKg) } ?? "Bodyweight")
+                    .foregroundStyle(CoachStyle.muted)
+                    .font(.subheadline)
+                if exercise.day.program.track != nil || exercise.day.isDeload {
+                    Text(exercise.day.isDeload ? "Aim for 4 or more reps in reserve" : "Aim for around 2 reps in reserve")
+                        .font(.footnote).foregroundStyle(CoachStyle.muted)
+                }
+            }
+            .coachCard()
 
-    private func displayWeight(_ w: Double) -> String {
-        if unitsKg { return String(format: "%.1f kg", w) }
-        return String(format: "%.1f lb", w * 2.20462)
+            if canLog || editing != nil { entry.id("setEntry") }
+            if exercise.logs.count >= exercise.sets, editing == nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("All \(exercise.sets) sets saved", systemImage: "checkmark.circle.fill")
+                        .font(.headline).foregroundStyle(CoachStyle.accent)
+                    if let target = nextTarget {
+                        Text("Next target: \(target.repMin)–\(target.repMax) reps" +
+                             (target.weight.map { " · " + WeightUnit.formatted($0, useKilograms: unitsKg) } ?? ""))
+                    }
+                }
+                .coachCard()
+            }
+            if exercise.day.status == .inProgress, let deadline = exercise.day.restUntil {
+                RestTimer(deadline: deadline, onClear: clearTimer).coachCard()
+            }
+            if !sortedLogs.isEmpty { savedSets.id("savedSets") }
+        }
+        .coachPage()
+    }
+
+    @ViewBuilder
+    private var saveBar: some View {
+        if canLog || editing != nil {
+            Button(editing == nil ? "Save set \(exercise.logs.count + 1)" : "Save changes", systemImage: "checkmark") {
+                saveSet()
+            }
+            .buttonStyle(CoachActionStyle())
+            .accessibilityIdentifier("saveSet")
+            .padding(.horizontal, 18)
+            .padding(.vertical, 8)
+            .frame(maxWidth: 656)
+            .frame(maxWidth: .infinity)
+            .background(.bar)
+        }
+    }
+
+    private var entry: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(editing.map { "Editing set \($0.setIdx)" } ?? "Set \(exercise.logs.count + 1) of \(exercise.sets)")
+                .font(.headline).accessibilityAddTraits(.isHeader)
+            Text(exercise.targetWeight == nil ? "Added weight" : "Weight")
+                .font(.subheadline.weight(.semibold))
+            HStack {
+                TextField("Weight", text: $weightText)
+                    .keyboardType(.decimalPad)
+                    .focused($weightFocused)
+                    .accessibilityLabel(unitsKg ? "Weight in kilograms" : "Weight in pounds")
+                    .accessibilityIdentifier("weightInput")
+                    .padding(.vertical, 10)
+                    .frame(minHeight: 44)
+                Text(unitsKg ? "kg" : "lb").foregroundStyle(CoachStyle.muted)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 12)
+            .background(.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
+            Stepper {
+                Text("Adjust by \(WeightUnit.formatted(increment, useKilograms: unitsKg))")
+                    .fixedSize(horizontal: false, vertical: true)
+            } onIncrement: { adjustWeight(by: increment) }
+              onDecrement: { adjustWeight(by: -increment) }
+            Divider()
+            Stepper(value: $reps, in: 1...100) {
+                Text("Reps: \(reps)").monospacedDigit().fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(minHeight: 44)
+            if enableRIR || editing?.rir != nil {
+                Toggle("Record reps in reserve", isOn: $recordEffort)
+                    .fixedSize(horizontal: false, vertical: true)
+                if recordEffort {
+                    Stepper(value: $rir, in: 0...6, step: 0.5) {
+                        Text("Reps in reserve: \(rir.formatted())")
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text("How many more reps could you have done?")
+                        .font(.footnote).foregroundStyle(CoachStyle.muted)
+                }
+            }
+            if editing != nil {
+                Button("Cancel edit") {
+                    editing = nil
+                    fill(from: sortedLogs.last)
+                    scrollTarget = "savedSets"
+                }
+                    .buttonStyle(CoachActionStyle(primary: false))
+            }
+        }
+        .coachCard()
+    }
+
+    private var savedSets: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Saved sets").font(.headline).accessibilityAddTraits(.isHeader)
+            ForEach(sortedLogs) { log in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Set \(log.setIdx)").font(.subheadline.weight(.semibold))
+                    Text("\(log.reps) reps · \(WeightUnit.formatted(log.actualWeight ?? 0, useKilograms: unitsKg))")
+                        .foregroundStyle(CoachStyle.muted)
+                    if exercise.day.status != .skipped {
+                        Button("Edit set \(log.setIdx)") {
+                            editing = log
+                            fill(from: log)
+                            scrollTarget = "setEntry"
+                        }
+                            .font(.subheadline.weight(.semibold))
+                            .frame(minHeight: 44, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .coachCard()
+    }
+
+    private var enteredWeight: Double? {
+        try? FloatingPointFormatStyle<Double>.number.locale(locale).parseStrategy.parse(weightText.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private func fill(from log: ExerciseLog?) {
+        let kg = log?.actualWeight ?? exercise.targetWeight ?? 0
+        weightText = WeightUnit.display(kg, useKilograms: unitsKg)
+            .formatted(.number.locale(locale).grouping(.never).precision(.fractionLength(0...3)))
+        reps = log?.reps ?? exercise.targetRepsMin
+        if reps > 100 { reps = 100 }
+        let reserve = exercise.day.isDeload ? 4.0 : (exercise.day.program.track == nil && exercise.phase == "STR" ? 1 : 2)
+        rir = log?.rir ?? reserve
+        recordEffort = log?.rir != nil
+    }
+
+    private func adjustWeight(by delta: Double) {
+        let base = enteredWeight.map { WeightUnit.kilograms($0, useKilograms: unitsKg) } ?? exercise.targetWeight ?? 0
+        weightText = WeightUnit.display(min(500, max(0, base + delta)), useKilograms: unitsKg)
+            .formatted(.number.locale(locale).grouping(.never).precision(.fractionLength(0...3)))
+    }
+
+    private func clearTimer() {
+        exercise.day.restUntil = nil
+        do { try context.save() }
+        catch { context.rollback(); errorMessage = error.localizedDescription }
     }
 
     private func saveSet() {
-        let logsBefore = exercise.logs.count
-        let set = ExerciseLog(dayExercise: exercise, setIdx: logsBefore + 1, actualWeight: weightForKg(), reps: reps, rir: enableRIR ? rir : nil)
-        context.insert(set)
-        try? context.save()
-
-        // Rest timer
-        showTimer = true
-
-        // Advance or finish
-        if logsBefore + 1 >= exercise.sets { // completing this set
-            computeAndPersistNextTargets()
-        }
-    }
-
-    private func weightForKg() -> Double {
-        return unitsKg ? weight : (weight / 2.20462)
-    }
-
-    private func computeAndPersistNextTargets() {
-        // Build engine inputs
-        let lastLogs: [SetLog] = exercise.logs.map { SetLog(weight: $0.actualWeight, reps: $0.reps, rir: $0.rir) }
-        let lastTarget = Target(weight: exercise.targetWeight, repMin: exercise.targetRepsMin, repMax: exercise.targetRepsMax, sets: exercise.sets, phase: exercise.phase)
-        let rule = Rule(equipment: exercise.template.equipment, barbellInc: barbellInc, dbInc: dbInc, deloadPct: 0.10, missLimit: 3)
-        let next = computeNextTargets(lastLogs: lastLogs, lastTarget: lastTarget, rule: rule, phase: exercise.phase, consecutiveMisses: 0, blockStartLoad: nil)
-        withAnimation { showNextTargets = next }
-
-        // Persist to next exposure if available (same template, next week)
-        if let day = exercise.day as DayPlan? {
-            let nextWeek = day.weekIdx + 1
-            let programID = day.program.persistentModelID // capture identity outside #Predicate
-            let req = FetchDescriptor<DayPlan>(predicate: #Predicate<DayPlan> { $0.program.persistentModelID == programID && $0.weekIdx == nextWeek })
-            if let targetDay = try? context.fetch(req).first {
-                if let nextEx = targetDay.exercises.first(where: { $0.template.name == exercise.template.name }) {
-                    nextEx.targetWeight = next.weight
-                    nextEx.targetRepsMin = next.repMin
-                    nextEx.targetRepsMax = next.repMax
-                    nextEx.sets = next.sets
-                    try? context.save()
-                }
+        weightFocused = false
+        guard let enteredWeight else { errorMessage = "Enter a valid weight."; return }
+        let kg = WeightUnit.kilograms(enteredWeight, useKilograms: unitsKg)
+        do {
+            if let log = editing {
+                nextTarget = try WorkoutLogging.editSet(log, kilograms: kg, reps: reps,
+                    rir: recordEffort ? rir : nil, barbellIncrement: barbellInc, dumbbellIncrement: dbInc, context: context)
+                editing = nil
+                scrollTarget = "savedSets"
+            } else {
+                nextTarget = try WorkoutLogging.saveSet(exercise: exercise, kilograms: kg, reps: reps,
+                    rir: recordEffort ? rir : nil, barbellIncrement: barbellInc, dumbbellIncrement: dbInc, context: context)
             }
-        }
-    }
-
-    private func nextTargetSummary(_ t: Target) -> String {
-        let w: String
-        if let tw = t.weight {
-            w = unitsKg ? String(format: "%.1f kg", tw) : String(format: "%.1f lb", tw * 2.20462)
-        } else { w = "bodyweight" }
-        return "\(t.sets)x\(t.repMin)-\(t.repMax) @ \(w) (\(t.phase))"
+            fill(from: sortedLogs.last)
+        } catch { errorMessage = error.localizedDescription }
     }
 }
