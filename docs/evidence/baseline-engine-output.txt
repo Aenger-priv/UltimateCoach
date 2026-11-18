@@ -1,0 +1,7 @@
+Empty logs next weight: Optional(62.5)
+One of three sets next weight: Optional(62.5)
+Lower actual load next weight: Optional(62.5)
+Rowing zone success: Zone4 46-30m
+Rowing zone failure: Zone4 46-30m
+Phase empty history: STR
+Pounds display: 132.2772 saved kg: 27.215574566138386

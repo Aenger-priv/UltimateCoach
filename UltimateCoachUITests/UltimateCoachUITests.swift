@@ -1,41 +1,63 @@
-//
-//  UltimateCoachUITests.swift
-//  UltimateCoachUITests
-//
-//  Created by Anders Enger on 28/09/2025.
-//
-
 import XCTest
 
 final class UltimateCoachUITests: XCTestCase {
-
-    override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
-
-        // In UI tests it is usually best to stop immediately when a failure occurs.
-        continueAfterFailure = false
-
-        // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
-    }
-
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
-    }
+    override func setUpWithError() throws { continueAfterFailure = false }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testOnboardingLoggingResumeAndHistory() throws {
         let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
         app.launch()
-
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
+        XCTAssertTrue(app.buttons["Use Today"].waitForExistence(timeout: 10))
+        app.buttons["Use Today"].tap()
+        XCTAssertTrue(app.buttons["Open workout"].waitForExistence(timeout: 5))
+        capture("Dark Today", app: app)
+        app.buttons["Open workout"].tap()
+        let target = app.buttons["Edit target weight, Bench Press"]
+        if !target.isHittable { app.swipeUp() }
+        target.tap()
+        XCTAssertTrue(app.textFields["Target weight in kilograms"].waitForExistence(timeout: 5))
+        app.buttons["Save target weight"].tap()
+        XCTAssertTrue(app.staticTexts["You set this target."].waitForExistence(timeout: 5))
+        if !app.buttons["Start workout"].isHittable { app.swipeDown() }
+        app.buttons["Start workout"].tap()
+        let logger = app.buttons["exerciseAction_0"]
+        XCTAssertTrue(logger.waitForExistence(timeout: 5))
+        if !logger.isHittable { app.swipeUp() }
+        logger.tap()
+        XCTAssertTrue(app.textFields["weightInput"].waitForExistence(timeout: 5))
+        capture("Dark set logger", app: app)
+        for _ in 0..<4 { app.buttons["saveSet"].tap() }
+        XCTAssertTrue(app.staticTexts["All 4 sets saved"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["saveSet"].exists)
+        app.buttons["Done"].firstMatch.tap()
+        app.navigationBars.buttons["Today"].tap()
+        XCTAssertTrue(app.buttons["Resume workout"].waitForExistence(timeout: 5))
+        app.buttons["Resume workout"].tap()
+        XCTAssertTrue(app.staticTexts["4 of 16 sets saved"].waitForExistence(timeout: 5))
+        app.buttons["Finish workout"].tap()
+        app.buttons["Finish and save"].tap()
+        XCTAssertTrue(app.staticTexts["Finished"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["Progress"].tap()
+        XCTAssertTrue(app.staticTexts["Workout history"].waitForExistence(timeout: 5))
+        app.buttons["historyWorkout_1_1"].tap()
+        let viewSets = app.buttons["exerciseAction_0"]
+        for _ in 0..<3 where !viewSets.isHittable { app.swipeUp() }
+        viewSets.tap()
+        let edit = app.buttons["Edit set 1"]
+        for _ in 0..<3 where !edit.isHittable { app.swipeUp() }
+        edit.tap()
+        XCTAssertTrue(app.textFields["weightInput"].isHittable)
+        XCTAssertEqual(app.buttons["saveSet"].label, "Save changes")
+        app.buttons["saveSet"].tap()
+        XCTAssertTrue(app.buttons["Edit set 1"].isHittable)
     }
 
     @MainActor
-    func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
-        }
+    private func capture(_ name: String, app: XCUIApplication) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

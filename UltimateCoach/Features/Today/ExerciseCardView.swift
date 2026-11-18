@@ -1,56 +1,42 @@
 import SwiftUI
-import SwiftData
-import Observation
 
 struct ExerciseCardView: View {
-    @Environment(\.modelContext) private var context
-    @Bindable var exercise: DayExercise
+    @AppStorage("units_kg") private var unitsKg = true
+    let exercise: DayExercise
     var onLog: () -> Void
+    var onEditTarget: () -> Void
+
+    private var canLog: Bool { exercise.day.status == .inProgress && exercise.logs.count < exercise.sets }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(exercise.template.name)
-                    .font(.headline)
-                Spacer()
-                phaseBadge
+        VStack(alignment: .leading, spacing: 9) {
+            Text(exercise.template.name)
+                .font(.headline).accessibilityAddTraits(.isHeader)
+            Text("\(exercise.sets) sets · \(exercise.targetRepsMin)–\(exercise.targetRepsMax) reps")
+                .font(.subheadline).foregroundStyle(CoachStyle.muted)
+            if let weight = exercise.targetWeight {
+                Text(WeightUnit.formatted(weight, useKilograms: unitsKg))
+                    .font(.subheadline.weight(.semibold)).monospacedDigit()
+            } else {
+                Text("Bodyweight").font(.subheadline).foregroundStyle(CoachStyle.muted)
             }
-
-            Text(summaryLine)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            HStack {
-                Text("Sets remaining: \(setsRemaining)")
-                    .font(.footnote)
-                Spacer()
+            if let note = exercise.targetNote {
+                Text(note).font(.footnote).foregroundStyle(CoachStyle.muted)
+            }
+            if exercise.day.status == .planned && exercise.logs.isEmpty {
+                Button("Edit target weight", systemImage: "slider.horizontal.3", action: onEditTarget)
+                    .buttonStyle(CoachActionStyle(primary: false))
+                    .accessibilityLabel("Edit target weight, \(exercise.template.name)")
+            }
+            if canLog || !exercise.logs.isEmpty {
                 Button(action: onLog) {
-                    Label("Log Set", systemImage: "pencil")
+                    Label(canLog ? "Log set" : "View sets", systemImage: canLog ? "plus" : "list.bullet")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(CoachActionStyle(primary: false))
+                .accessibilityLabel("\(canLog ? "Log set" : "View sets"), \(exercise.template.name)")
+                .accessibilityIdentifier("exerciseAction_\(exercise.orderIdx)")
             }
         }
-        .padding(.vertical, 6)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(exercise.template.name), \(summaryLine), \(setsRemaining) sets remaining")
-    }
-
-    private var setsRemaining: Int { max(0, exercise.sets - exercise.logs.count) }
-
-    private var phaseBadge: some View {
-        Text(exercise.phase)
-            .font(.caption.bold())
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(exercise.phase == "HYP" ? Color.blue.opacity(0.15) : Color.orange.opacity(0.15))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-    }
-
-    private var summaryLine: String {
-        let w = exercise.targetWeight
-        let reps = "\(exercise.sets)x\(exercise.targetRepsMin)-\(exercise.targetRepsMax)"
-        if let w {
-            return String(format: "%@ @ %.1f kg", reps, w)
-        }
-        return reps
+        .coachCard()
     }
 }

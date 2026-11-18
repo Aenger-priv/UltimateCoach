@@ -1,54 +1,23 @@
-//
-//  ContentView.swift
-//  UltimateCoach
-//
-//  Created by Anders Enger on 28/09/2025.
-//
-
 import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var context
-    @AppStorage("did_setup_start_date") private var didSetup = false
-    @State private var showStartDateSetup = false
+    @Query private var programs: [Program]
 
     var body: some View {
-        TabView {
-            TodayView()
-                .tabItem { Label("Today", systemImage: "calendar") }
-            ProgressScreen()
-                .tabItem { Label("Progress", systemImage: "chart.line.uptrend.xyaxis") }
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape") }
+        Group {
+            if programs.isEmpty {
+                StartDateSetupView()
+            } else {
+                TabView {
+                    Tab("Today", systemImage: "bolt.fill") { TodayView() }
+                    Tab("Program", systemImage: "calendar") { ProgramScreen() }
+                    Tab("Progress", systemImage: "chart.line.uptrend.xyaxis") { ProgressScreen() }
+                    Tab("Settings", systemImage: "gearshape") { SettingsView() }
+                }
+            }
         }
-        .onAppear {
-            evaluateSetup()
-            Task { await ensureSeededIfNeeded() }
-        }
-        .fullScreenCover(isPresented: $showStartDateSetup, onDismiss: {
-            Task { await ensureSeededIfNeeded() }
-        }) {
-            StartDateSetupView()
-        }
+        .preferredColorScheme(.dark)
+        .tint(CoachStyle.accent)
     }
-
-    private func evaluateSetup() {
-        let count = (try? context.fetchCount(FetchDescriptor<Program>())) ?? 0
-        let hasProgram = count > 0
-        showStartDateSetup = !hasProgram
-    }
-
-    @MainActor
-    private func ensureSeededIfNeeded() async {
-        let dayCount = (try? context.fetchCount(FetchDescriptor<DayPlan>())) ?? 0
-        if dayCount == 0 {
-            let program = try? context.fetch(FetchDescriptor<Program>()).first
-            await SeedData.seedIfNeeded(context: context, overrideStartDate: program?.startDate)
-        }
-    }
-}
-
-#Preview {
-    ContentView()
 }

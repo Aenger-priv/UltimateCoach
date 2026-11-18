@@ -8,7 +8,9 @@ public func shouldSwitchPhase(
     blockStartLoad: Double?,
     currentLoad: Double?
 ) -> String {
-    let avgRIR = history.compactMap { $0.rir }.reduce(0, +) / max(1.0, Double(history.compactMap { $0.rir }.count))
+    guard !history.isEmpty else { return currentPhase }
+    let assumedRIR = currentPhase == "HYP" ? 2.0 : 1.0
+    let avgRIR = history.map { $0.rir ?? assumedRIR }.reduce(0, +) / Double(history.count)
     if currentPhase == "HYP" {
         if let start = blockStartLoad, let curr = currentLoad, start > 0 {
             let gained = (curr - start) / start

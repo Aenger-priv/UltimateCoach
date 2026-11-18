@@ -51,6 +51,18 @@ public func computeNextTargets(
     consecutiveMisses: Int,
     blockStartLoad: Double?
 ) -> Target {
+    // Never progress from missing, partial, invalid, or lighter-than-prescribed work.
+    guard lastTarget.sets > 0, lastLogs.count == lastTarget.sets,
+          lastLogs.allSatisfy({ $0.reps > 0 && ($0.weight.map { $0.isFinite && $0 >= 0 } ?? true)
+              && ($0.rir.map { $0.isFinite && $0 >= 0 && $0 <= 6 } ?? true) }),
+          rule.barbellInc.isFinite, rule.barbellInc > 0,
+          rule.dbInc.isFinite, rule.dbInc > 0,
+          rule.deloadPct.isFinite, (0..<1).contains(rule.deloadPct), rule.missLimit > 0
+    else { return lastTarget }
+    if let prescribed = lastTarget.weight,
+       lastLogs.contains(where: { ($0.weight ?? 0) + 0.005 < prescribed }) {
+        return lastTarget
+    }
     let top = lastTarget.repMax
     let minReps = lastTarget.repMin
     let targetRIRTop: Double = (phase == "HYP") ? 2.0 : 1.0
@@ -84,8 +96,7 @@ public func computeNextTargets(
 }
 
 public func estimate1RM(weight: Double, reps: Int) -> Double {
-    guard reps > 0 else { return weight }
-    return weight * (1.0 + Double(reps) / 30.0)
+    epley1RM(weight: weight, reps: reps)
 }
 
 // MARK: - Helpers

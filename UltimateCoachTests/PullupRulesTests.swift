@@ -1,6 +1,7 @@
 import XCTest
 @testable import UltimateCoach
 
+@MainActor
 final class PullupRulesTests: XCTestCase {
     func testAddWeightWhenVolumeHigh() throws {
         let logs = [SetLog(weight: nil, reps: 10, rir: 2), SetLog(weight: nil, reps: 8, rir: 2), SetLog(weight: nil, reps: 8, rir: 2), SetLog(weight: nil, reps: 8, rir: 2)]
@@ -15,3 +16,9 @@ final class PullupRulesTests: XCTestCase {
     }
 }
 
+
+extension PullupRulesTests {
+    func testModerateBodyweightVolumeHoldsLoad() {
+        XCTAssertEqual(aggregatePullupVolume(logs: [SetLog(weight: nil, reps: 8, rir: 2)]).suggestedWeightDelta, 0)
+    }
+}

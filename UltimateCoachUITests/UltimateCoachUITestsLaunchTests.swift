@@ -1,33 +1,34 @@
-//
-//  UltimateCoachUITestsLaunchTests.swift
-//  UltimateCoachUITests
-//
-//  Created by Anders Enger on 28/09/2025.
-//
-
 import XCTest
 
 final class UltimateCoachUITestsLaunchTests: XCTestCase {
-
-    override class var runsForEachTargetApplicationUIConfiguration: Bool {
-        true
-    }
-
-    override func setUpWithError() throws {
-        continueAfterFailure = false
-    }
-
     @MainActor
-    func testLaunch() throws {
+    func testLargeTextLoggerCanSave() throws {
         let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
-
-        // Insert steps here to perform after app launch but before taking a screenshot,
-        // such as logging into a test account or navigating somewhere in the app
-
+        let start = app.buttons["Use Today"]
+        XCTAssertTrue(start.waitForExistence(timeout: 10))
+        if !start.isHittable { app.swipeUp() }
+        start.tap()
+        XCTAssertTrue(app.buttons["Open workout"].waitForExistence(timeout: 5))
+        if !app.buttons["Open workout"].isHittable { app.swipeUp() }
+        app.buttons["Open workout"].tap()
+        if !app.buttons["Start workout"].isHittable { app.swipeUp() }
+        app.buttons["Start workout"].tap()
+        let log = app.buttons["exerciseAction_0"]
+        for _ in 0..<4 where !log.isHittable { app.swipeUp() }
+        XCTAssertTrue(log.isHittable)
+        log.tap()
+        XCTAssertTrue(app.buttons["saveSet"].waitForExistence(timeout: 5))
+        let entry = app.textFields["weightInput"]
+        for _ in 0..<4 where !entry.isHittable { app.swipeUp() }
+        XCTAssertTrue(entry.isHittable)
+        app.swipeUp()
         let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = "Launch Screen"
+        attachment.name = "Dark logger at largest text size"
         attachment.lifetime = .keepAlways
         add(attachment)
+        app.buttons["saveSet"].tap()
+        XCTAssertEqual(app.buttons["saveSet"].label, "Save set 2")
     }
 }

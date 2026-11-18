@@ -39,6 +39,8 @@ final class DayExercise {
     var day: DayPlan
     var template: ExerciseTemplate
     var targetWeight: Double? // kg
+    var targetNote: String?
+    var manualTarget: Bool?
     var targetRepsMin: Int
     var targetRepsMax: Int
     var sets: Int
@@ -130,6 +132,9 @@ final class Conditioning {
     var targetZone: String?
     var targetPace: String?
     var durationMin: Int?
+    var loggedMinutes: Int?
+    var loggedMeters: Int?
+    var loggedAt: Date?
 
     init(day: DayPlan,
          type: String,
