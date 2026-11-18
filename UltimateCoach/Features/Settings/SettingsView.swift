@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
+    @Query private var programs: [Program]
     @AppStorage("units_kg") private var unitsKg = true
     @AppStorage("barbell_inc") private var barbellInc = 2.5
     @AppStorage("db_inc") private var dbInc = 2.0
@@ -38,8 +39,10 @@ struct SettingsView: View {
                     Text("Record how many more reps you could have completed.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                Section("Program") {
-                    Button("Move upcoming workouts", systemImage: "calendar") { showingSchedule = true }
+                if programs.contains(where: { !$0.isArchived }) {
+                    Section("Program") {
+                        Button("Move upcoming workouts", systemImage: "calendar") { showingSchedule = true }
+                    }
                 }
                 Section("Backup") {
                     Button("Export workout backup", systemImage: "square.and.arrow.up") {
@@ -75,7 +78,7 @@ struct SettingsView: View {
                     confirmingImport = true
                 } catch { message = "Backup could not be read. " + error.localizedDescription }
             }
-            .confirmationDialog("Replace your current plan and logs with \(importName)?", isPresented: $confirmingImport,
+            .confirmationDialog("Restore workout backup for \(importName)?", isPresented: $confirmingImport,
                                 titleVisibility: .visible) {
                 Button("Replace with backup", role: .destructive) {
                     guard let data = pendingImport else { return }

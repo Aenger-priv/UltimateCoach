@@ -36,12 +36,13 @@ enum SeedData {
     }
 
     enum CycleError: LocalizedError {
-        case cycleInProgress, startDateTooEarly
+        case cycleInProgress, startDateTooEarly, alreadyArchived
 
         var errorDescription: String? {
             switch self {
             case .cycleInProgress: "Finish the current cycle and any active workout first."
             case .startDateTooEarly: "Choose a start date after your current cycle."
+            case .alreadyArchived: "This program has already ended."
             }
         }
     }
@@ -66,11 +67,30 @@ enum SeedData {
                 throw CycleError.cycleInProgress
             }
             guard start >= previous.nextStartDate(calendar: calendar) else { throw CycleError.startDateTooEarly }
+        } else if let endedAt = Program.latestArchived(in: programs)?.archivedAt,
+                  start < calendar.startOfDay(for: endedAt) {
+            throw CycleError.startDateTooEarly
         }
         let config = try load(track == .hypertrophy ? "hypertrophy_seed" : "strength_seed")
         return try save(context) {
             previous?.archivedAt = now
             return makeProgram(config, track: track, starts: start, previous: previous, context: context, calendar: calendar)
+        }
+    }
+
+    static func endCycleEarly(_ program: Program, context: ModelContext, now: Date = .now) throws {
+        guard !program.isArchived else { throw CycleError.alreadyArchived }
+        try save(context) {
+            for day in program.days where day.status == .inProgress {
+                if day.hasResults {
+                    // Date the partial session by the work performed, even if the program ends weeks later.
+                    day.finishedAt = day.activityDate ?? day.startedAt ?? now
+                } else {
+                    day.startedAt = nil
+                }
+                day.restUntil = nil
+            }
+            program.archivedAt = now
         }
     }
 

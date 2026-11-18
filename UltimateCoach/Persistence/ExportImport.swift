@@ -76,13 +76,15 @@ struct ExportImport {
     @MainActor static func exportJSON(context: ModelContext) throws -> Data {
         let programs = try context.fetch(FetchDescriptor<Program>())
         let active = programs.filter { !$0.isArchived }
-        guard active.count == 1, let program = active.first else {
-            throw BackupError.invalid("Expected one active program to export.")
+        guard active.count <= 1, let program = active.first ?? Program.latestArchived(in: programs) else {
+            throw BackupError.invalid("No workout history is available to export.")
         }
         let rules = try context.fetch(FetchDescriptor<ProgressionRule>())
         let phases = try context.fetch(FetchDescriptor<PhaseState>())
         var root = snapshot(program, rules: rules, phases: phases)
-        let archivedCycles = programs.filter(\.isArchived)
+        // Archive-only backups use version 5. Active-cycle backups remain compatible with version 4 readers.
+        if program.isArchived { root.formatVersion = 5 }
+        let archivedCycles = programs.filter { $0.isArchived && $0 !== program }
             .sorted { ($0.archivedAt ?? .distantPast, $0.startDate) < ($1.archivedAt ?? .distantPast, $1.startDate) }
             .map { snapshot($0, rules: rules, phases: phases) }
         if !archivedCycles.isEmpty { root.archivedCycles = archivedCycles }
@@ -153,7 +155,8 @@ struct ExportImport {
 
     static func validatedProgram(_ data: Data) throws -> ExportProgram {
         let root = try JSONDecoder().decode(ExportProgram.self, from: data)
-        guard root.archivedAt == nil, (root.archivedCycles?.count ?? 0) <= 100 else {
+        guard root.archivedAt == nil || root.formatVersion == 5,
+              (root.archivedCycles?.count ?? 0) <= 100 else {
             throw BackupError.invalid("This backup has invalid cycle history.")
         }
         try validate(root)
@@ -167,7 +170,7 @@ struct ExportImport {
     }
 
     private static func validate(_ root: ExportProgram) throws {
-        guard (1...4).contains(root.formatVersion ?? 1), (1...104).contains(root.totalWeeks),
+        guard (1...5).contains(root.formatVersion ?? 1), (1...104).contains(root.totalWeeks),
               !root.name.isEmpty, !root.days.isEmpty, root.days.count <= 728 else {
             throw BackupError.invalid("This backup has an unsupported version or invalid program.")
         }

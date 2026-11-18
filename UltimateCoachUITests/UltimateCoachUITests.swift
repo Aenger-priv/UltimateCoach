@@ -40,6 +40,18 @@ final class UltimateCoachUITests: XCTestCase {
         app.buttons["Finish and save"].tap()
         XCTAssertTrue(app.staticTexts["Finished"].waitForExistence(timeout: 5))
         app.tabBars.buttons["Progress"].tap()
+        let benchTrend = app.buttons["exerciseTrend_Bench Press_barbell"]
+        XCTAssertTrue(benchTrend.waitForExistence(timeout: 5))
+        benchTrend.tap()
+        let metric = app.buttons["exerciseTrendMetric"]
+        XCTAssertTrue(metric.waitForExistence(timeout: 5))
+        XCTAssertEqual(metric.value as? String, "Heaviest set")
+        XCTAssertTrue(app.staticTexts["latestTrendValue"].exists)
+        XCTAssertTrue(app.staticTexts["Log another qualifying workout to see a trend."].exists)
+        metric.tap()
+        app.buttons["Estimated 1-rep max"].tap()
+        XCTAssertEqual(metric.value as? String, "Estimated 1-rep max")
+        app.navigationBars.buttons["Progress"].tap()
         XCTAssertTrue(app.staticTexts["Workout history"].waitForExistence(timeout: 5))
         app.buttons["historyWorkout_1_1"].tap()
         let viewSets = app.buttons["exerciseAction_0"]
@@ -71,13 +83,16 @@ final class UltimateCoachUITests: XCTestCase {
         app.buttons["Open workout"].tap()
         XCTAssertTrue(app.staticTexts["3 sets · 3–5 reps"].exists)
         app.tabBars.buttons["Program"].tap()
+        XCTAssertTrue(app.staticTexts["Strength"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Day 1 · Mixed Upper"].exists)
+        XCTAssertTrue(app.staticTexts["Day 2 · Lower Body"].exists)
         let picker = app.buttons["trainingWeekPicker"]
         XCTAssertTrue(picker.waitForExistence(timeout: 5))
         picker.tap()
         let deload = app.buttons["Week 13 · Deload"]
         XCTAssertTrue(deload.waitForExistence(timeout: 5))
         deload.tap()
-        XCTAssertTrue(app.staticTexts["Day 1"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Day 1 · Mixed Upper"].waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -100,6 +115,51 @@ final class UltimateCoachUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Open workout"].waitForExistence(timeout: 5))
         app.tabBars.buttons["Program"].tap()
         XCTAssertTrue(app.staticTexts["Strength"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testEndProgramEarlyKeepsWorkAndStartsAnotherTrack() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        XCTAssertTrue(app.buttons["track_strength"].waitForExistence(timeout: 10))
+        app.buttons["track_strength"].tap()
+        let create = app.buttons["createCycle"]
+        for _ in 0..<4 where !create.isHittable { app.swipeUp() }
+        create.tap()
+        XCTAssertTrue(app.buttons["Open workout"].waitForExistence(timeout: 5))
+        app.buttons["Open workout"].tap()
+        app.buttons["Start workout"].tap()
+        let lift = app.buttons["exerciseAction_0"]
+        for _ in 0..<3 where !lift.isHittable { app.swipeUp() }
+        lift.tap()
+        app.buttons["saveSet"].tap()
+        app.buttons["Done"].firstMatch.tap()
+
+        app.tabBars.buttons["Program"].tap()
+        let end = app.buttons["End program early"]
+        for _ in 0..<4 where !end.isHittable { app.swipeUp() }
+        XCTAssertTrue(end.isHittable)
+        end.tap()
+        app.alerts.buttons["Keep program"].tap()
+        XCTAssertTrue(end.waitForExistence(timeout: 5))
+        end.tap()
+        app.alerts.buttons["End and choose a track"].tap()
+
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        XCTAssertEqual(create.label, "Start Hypertrophy cycle")
+        app.buttons["Cancel"].tap()
+        let restart = app.buttons["Choose next track"]
+        XCTAssertTrue(restart.waitForExistence(timeout: 5))
+        app.tabBars.buttons["Progress"].tap()
+        XCTAssertTrue(app.buttons["historyWorkout_1_1"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["1 set saved"].exists)
+        app.tabBars.buttons["Program"].tap()
+        restart.tap()
+        for _ in 0..<4 where !create.isHittable { app.swipeUp() }
+        create.tap()
+        XCTAssertTrue(app.staticTexts["Hypertrophy"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Day 1 · Mixed Upper"].exists)
     }
 
     @MainActor

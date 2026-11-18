@@ -14,11 +14,17 @@ struct StartDateSetupView: View {
         self.previous = previous
         let recommended = (previous?.track ?? .hypertrophy).alternate
         _selectedTrack = State(initialValue: previous == nil ? .hypertrophy : recommended)
-        _selectedDate = State(initialValue: max(Date(), previous?.nextStartDate() ?? .distantPast))
+        _selectedDate = State(initialValue: max(Date(), Self.earliestStart(after: previous)))
     }
 
     private var minimumDate: Date {
-        previous?.nextStartDate() ?? .distantPast
+        Self.earliestStart(after: previous)
+    }
+
+    private static func earliestStart(after previous: Program?) -> Date {
+        guard let previous else { return .distantPast }
+        if let archivedAt = previous.archivedAt { return Calendar.current.startOfDay(for: archivedAt) }
+        return previous.nextStartDate()
     }
 
     var body: some View {
@@ -33,7 +39,9 @@ struct StartDateSetupView: View {
                     Text("12 training weeks · 4 sessions per week · 1 lighter week")
                         .font(.subheadline).foregroundStyle(CoachStyle.muted)
                     if let previous {
-                        Text("\((previous.track ?? .hypertrophy).alternate.title) is suggested after your last cycle. You can repeat either track.")
+                        Text(previous.isArchived
+                             ? "Your new cycle starts at Week 1 with fresh weight targets. Your old workouts are in Progress."
+                             : "\((previous.track ?? .hypertrophy).alternate.title) is suggested after your last cycle. You can repeat either track.")
                             .foregroundStyle(CoachStyle.muted)
                     }
                     ForEach(TrainingTrack.allCases) { track in

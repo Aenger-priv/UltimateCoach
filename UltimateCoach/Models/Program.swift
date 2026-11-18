@@ -14,6 +14,12 @@ final class Program {
     var isArchived: Bool { archivedAt != nil }
     var trainingWeeks: Int { deloadWeek.map { $0 - 1 } ?? totalWeeks }
 
+    static func latestArchived(in programs: [Program]) -> Program? {
+        programs.filter(\.isArchived).max {
+            ($0.archivedAt ?? .distantPast, $0.startDate) < ($1.archivedAt ?? .distantPast, $1.startDate)
+        }
+    }
+
     func nextStartDate(calendar: Calendar = .current) -> Date {
         let scheduledEnd = calendar.date(byAdding: .day, value: totalWeeks * 7, to: startDate) ?? startDate
         let lastPlannedDate = days.filter { $0.status == .planned }.compactMap(\.date).max()

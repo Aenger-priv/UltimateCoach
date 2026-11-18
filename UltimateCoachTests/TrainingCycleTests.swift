@@ -98,6 +98,70 @@ final class TrainingCycleTests: XCTestCase {
         XCTAssertEqual(program.stage(now: after), .deload)
     }
 
+    func testEndingEarlyPreservesPartialSessionAndRestartsWithFreshTargets() throws {
+        let container = try store()
+        let context = container.mainContext
+        let strength = try SeedData.startCycle(.strength, starts: date, context: context)
+        let bench = try XCTUnwrap(lift("Bench Press", day: 1, week: 1, in: strength))
+        try WorkoutSession.start(bench.day, context: context, now: date)
+        for _ in 0..<bench.sets {
+            try WorkoutLogging.saveSet(exercise: bench, kilograms: 90, reps: 5, rir: 2,
+                barbellIncrement: 2.5, dumbbellIncrement: 2, context: context)
+        }
+        let conditioning = try XCTUnwrap(bench.day.conditioning)
+        let loggedAt = date.addingTimeInterval(3600)
+        try WorkoutSession.recordConditioning(conditioning, minutes: 15, meters: 2000, context: context, now: loggedAt)
+        let endedAt = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: 45, to: date))
+        XCTAssertLessThan(endedAt, strength.nextStartDate())
+
+        try SeedData.endCycleEarly(strength, context: context, now: endedAt)
+        XCTAssertTrue(strength.isArchived)
+        XCTAssertEqual(bench.day.status, .finished)
+        XCTAssertEqual(bench.day.startedAt, date)
+        XCTAssertEqual(bench.day.activityDate, loggedAt)
+        XCTAssertNil(bench.day.restUntil)
+        XCTAssertThrowsError(try SeedData.endCycleEarly(strength, context: context, now: endedAt))
+
+        let backup = try ExportImport.exportJSON(context: context)
+        let root = try ExportImport.validatedProgram(backup)
+        XCTAssertEqual(root.formatVersion, 5)
+        XCTAssertEqual(root.archivedAt, endedAt)
+        try ExportImport.importJSON(backup, context: context)
+        let restored = try XCTUnwrap(context.fetch(FetchDescriptor<Program>()).first)
+        let restoredBench = try XCTUnwrap(lift("Bench Press", day: 1, week: 1, in: restored))
+        XCTAssertEqual(restoredBench.logs.count, 3)
+        XCTAssertEqual(restoredBench.day.conditioning?.loggedMeters, 2000)
+        XCTAssertThrowsError(try SeedData.startCycle(.hypertrophy, starts: date, context: context, now: endedAt))
+        let newProgram = try SeedData.startCycle(.hypertrophy, starts: endedAt, context: context, now: endedAt)
+        let newBench = try XCTUnwrap(lift("Bench Press", day: 1, week: 1, in: newProgram))
+        XCTAssertEqual(newBench.day.date, endedAt)
+        XCTAssertEqual(newBench.targetWeight, 50)
+        XCTAssertTrue(newBench.logs.isEmpty)
+        XCTAssertTrue(restored.isArchived)
+    }
+
+    func testReschedulePastAnotherWorkoutOnlyChangesTheSelectedDate() throws {
+        let container = try store()
+        let context = container.mainContext
+        let program = try SeedData.startCycle(.strength, starts: date, context: context)
+        let dayTwo = try XCTUnwrap(program.days.first { $0.weekIdx == 1 && $0.dayIdx == 2 })
+        let dayFour = try XCTUnwrap(program.days.first { $0.weekIdx == 1 && $0.dayIdx == 4 })
+        let dayFourDate = try XCTUnwrap(dayFour.date)
+        let originalDates = Dictionary(uniqueKeysWithValues: program.days.map { ($0.persistentModelID, $0.date) })
+        let laterDate = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: 1, to: dayFourDate))
+        let initialTargets = dayTwo.exercises.sorted { $0.orderIdx < $1.orderIdx }.map(\.targetWeight)
+
+        try WorkoutSession.reschedule(dayTwo, to: laterDate, context: context)
+
+        XCTAssertEqual(dayTwo.date, laterDate)
+        XCTAssertEqual(dayTwo.dayIdx, 2)
+        XCTAssertEqual(dayTwo.weekIdx, 1)
+        XCTAssertEqual(dayTwo.exercises.sorted { $0.orderIdx < $1.orderIdx }.map(\.targetWeight), initialTargets)
+        for day in program.days where day !== dayTwo {
+            XCTAssertEqual(day.date, originalDates[day.persistentModelID] ?? nil)
+        }
+    }
+
     private func store() throws -> ModelContainer {
         try ModelContainer(for: Program.self, DayPlan.self, ExerciseTemplate.self, DayExercise.self,
             ExerciseLog.self, ProgressionRule.self, PhaseState.self, Conditioning.self,

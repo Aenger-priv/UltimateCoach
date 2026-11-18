@@ -9,6 +9,7 @@ struct WorkoutScreen: View {
     @State private var selectedTarget: DayExercise?
     @State private var showConditioning = false
     @State private var showReschedule = false
+    @State private var rescheduleError: String?
     @State private var chosenDate = Date()
     @State private var confirmFinish = false
     @State private var confirmSkip = false
@@ -26,6 +27,7 @@ struct WorkoutScreen: View {
                         layout {
                             Button("Reschedule", systemImage: "calendar") {
                                 chosenDate = day.date ?? .now
+                                rescheduleError = nil
                                 showReschedule = true
                             }
                             Button("Skip workout", systemImage: "forward.end") { confirmSkip = true }
@@ -81,8 +83,17 @@ struct WorkoutScreen: View {
         .sheet(isPresented: $showReschedule) {
             NavigationStack {
                 Form {
-                    DatePicker("New workout date", selection: $chosenDate, displayedComponents: .date)
+                    Section {
+                        DatePicker("New workout date", selection: $chosenDate, displayedComponents: .date)
+                        if let rescheduleError {
+                            Text(rescheduleError)
+                                .foregroundStyle(.red)
+                        }
+                    } footer: {
+                        Text("Moves this workout only. Other workout dates and targets stay the same.")
+                    }
                 }
+                .onChange(of: chosenDate) { _, _ in rescheduleError = nil }
                 .navigationTitle("Reschedule")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -93,8 +104,7 @@ struct WorkoutScreen: View {
                                 try WorkoutSession.reschedule(day, to: chosenDate, context: context)
                                 showReschedule = false
                             } catch {
-                                showReschedule = false
-                                message = error.localizedDescription
+                                rescheduleError = error.localizedDescription
                             }
                         }
                     }

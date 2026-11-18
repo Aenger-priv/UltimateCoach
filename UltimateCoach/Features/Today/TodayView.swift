@@ -8,6 +8,7 @@ struct TodayView: View {
     private var activeProgram: Program? { programs.first { !$0.isArchived } }
     @Environment(\.scenePhase) private var scenePhase
     @State private var currentDate = Date()
+    @State private var restartFrom: Program?
 
     var body: some View {
         NavigationStack {
@@ -26,6 +27,14 @@ struct TodayView: View {
                     } else if let next = nextWorkout {
                         Text("Rest day").font(.title2.bold()).accessibilityAddTraits(.isHeader)
                         workoutCard(next, eyebrow: "UP NEXT", action: "Preview workout")
+                    } else if activeProgram == nil, let archived = Program.latestArchived(in: programs) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Ready for a new program").font(.title2.bold())
+                            Text("Your saved workouts are in Progress.").foregroundStyle(CoachStyle.muted)
+                            Button("Choose next track", systemImage: "arrow.right") { restartFrom = archived }
+                                .buttonStyle(CoachActionStyle())
+                        }
+                        .coachCard()
                     } else {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("No upcoming workouts").font(.title2.bold())
@@ -62,6 +71,7 @@ struct TodayView: View {
             }
             .coachBackground()
             .navigationTitle("Today")
+            .sheet(item: $restartFrom) { StartDateSetupView(previous: $0) }
             .onChange(of: scenePhase) { _, phase in if phase == .active { currentDate = Date() } }
         }
     }
