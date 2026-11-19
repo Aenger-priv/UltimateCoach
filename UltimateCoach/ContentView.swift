@@ -3,6 +3,12 @@ import SwiftData
 
 struct ContentView: View {
     @Query private var programs: [Program]
+    @AppStorage("rest_whistle") private var restWhistle = false
+
+    private var whistleDeadline: Date? {
+        guard restWhistle, let program = programs.first(where: { !$0.isArchived }) else { return nil }
+        return program.days.first(where: { $0.status == .inProgress })?.restUntil
+    }
 
     var body: some View {
         Group {
@@ -19,5 +25,6 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .tint(CoachStyle.accent)
+        .onChange(of: whistleDeadline, initial: true) { _, deadline in RestWhistle.schedule(for: deadline) }
     }
 }

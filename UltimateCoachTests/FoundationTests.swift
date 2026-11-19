@@ -63,6 +63,98 @@ final class FoundationTests: XCTestCase {
         XCTAssertEqual(squat.logs.count, 4)
     }
 
+    func testUndoLastSetRestoresTheNextWeightAndPriorRestDeadline() throws {
+        let store = try container()
+        let context = store.mainContext
+        let program = try SeedData.startCycle(.hypertrophy, starts: .now, context: context)
+        let exercise = try XCTUnwrap(program.days.first { $0.weekIdx == 1 && $0.dayIdx == 1 }?
+            .exercises.first { $0.template.name == "Bench Press" })
+        let next = try XCTUnwrap(program.days.first { $0.weekIdx == 2 && $0.dayIdx == 1 }?
+            .exercises.first { $0.template === exercise.template })
+        let deload = try XCTUnwrap(program.days.first { $0.isDeload && $0.dayIdx == 1 }?
+            .exercises.first { $0.template === exercise.template })
+        let originalDeloadLoad = deload.targetWeight
+        try WorkoutSession.start(exercise.day, context: context)
+        for _ in 0..<(exercise.sets - 1) {
+            try WorkoutLogging.saveSet(exercise: exercise, kilograms: 50, reps: 12, rir: 2,
+                barbellIncrement: 2.5, dumbbellIncrement: 2, context: context)
+        }
+        let rest = try XCTUnwrap(exercise.day.restUntil)
+        try WorkoutSession.extendRest(exercise.day, context: context)
+        let longerRest = rest.addingTimeInterval(30)
+        XCTAssertEqual(exercise.day.restUntil, longerRest)
+        let last = try WorkoutLogging.logSet(exercise: exercise, kilograms: 50, reps: 12, rir: 2,
+            barbellIncrement: 2.5, dumbbellIncrement: 2, context: context)
+        XCTAssertEqual(next.targetWeight, 52.5)
+        XCTAssertEqual(WorkoutLogging.changedTargets(after: exercise.day).map(\.targetWeight), [52.5])
+        try WorkoutLogging.undo(last, context: context)
+        XCTAssertEqual(exercise.logs.count, exercise.sets - 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<ExerciseLog>()), exercise.sets - 1)
+        XCTAssertEqual(exercise.day.restUntil, longerRest)
+        XCTAssertEqual(next.targetWeight, 50)
+        XCTAssertNil(next.targetNote)
+        XCTAssertEqual(deload.targetWeight, originalDeloadLoad)
+        XCTAssertTrue(WorkoutLogging.changedTargets(after: exercise.day).isEmpty)
+        XCTAssertThrowsError(try WorkoutLogging.undo(last, context: context))
+        try WorkoutSession.endRest(exercise.day, context: context)
+        XCTAssertNil(exercise.day.restUntil)
+    }
+
+    func testExerciseSwapKeepsOneOffLogsSeparateAndUpdatesOnlyTheSelectedFutureSlot() throws {
+        let store = try container()
+        let context = store.mainContext
+        let program = try SeedData.startCycle(.strength, starts: .now, context: context)
+        func bench(week: Int, slot: Int) throws -> DayExercise {
+            let day = try XCTUnwrap(program.days.first { $0.weekIdx == week && $0.dayIdx == slot })
+            return try XCTUnwrap(day.exercises.first { $0.template.name == "Bench Press" })
+        }
+        let first = try bench(week: 1, slot: 1)
+        let next = try bench(week: 2, slot: 1)
+        let differentSlot = try bench(week: 2, slot: 4)
+        let originalRest = first.restSeconds
+        let oneOff = ExerciseSubstitution.Choice("Push-Up", "bodyweight")
+        try ExerciseSubstitution.swap(first, to: oneOff, weight: nil, includeUpcoming: false, context: context)
+        XCTAssertEqual(first.restSeconds, originalRest)
+        XCTAssertEqual(first.template.name, "Push-Up")
+        XCTAssertEqual(next.template.name, "Bench Press")
+        try WorkoutSession.start(first.day, context: context)
+        try WorkoutLogging.saveSet(exercise: first, kilograms: 0, reps: 12, rir: nil,
+            barbellIncrement: 2.5, dumbbellIncrement: 2, context: context)
+        XCTAssertTrue(ExerciseSubstitution.choices(for: first).isEmpty)
+        try WorkoutSession.finish(first.day, context: context)
+        XCTAssertNil(try WorkoutLogging.previousSet(for: next, context: context))
+
+        try ExerciseSubstitution.swap(next, to: oneOff, weight: nil, includeUpcoming: true, context: context)
+        XCTAssertEqual(differentSlot.template.name, "Bench Press")
+        XCTAssertEqual(program.days.first { $0.dayIdx == 1 && $0.weekIdx == 3 }?
+            .exercises.first { $0.orderIdx == next.orderIdx }?.template.name, "Push-Up")
+        XCTAssertEqual(try WorkoutLogging.previousSet(for: next, context: context)?.reps, 12)
+        let backup = try ExportImport.validatedProgram(ExportImport.exportJSON(context: context))
+        XCTAssertEqual(backup.days.first?.exercises.first?.templateName, "Push-Up")
+        XCTAssertEqual(backup.days.first?.exercises.first?.logs.first?.reps, 12)
+    }
+
+    func testSchedulePreviewMatchesWriteWhileKeepingMissedAndActiveDays() throws {
+        let store = try container()
+        let context = store.mainContext
+        let calendar = Calendar.current
+        let now = calendar.startOfDay(for: .now)
+        let start = try XCTUnwrap(calendar.date(byAdding: .day, value: -2, to: now))
+        let program = try SeedData.startCycle(.hypertrophy, starts: start, context: context)
+        let missed = try XCTUnwrap(program.days.first { $0.weekIdx == 1 && $0.dayIdx == 1 })
+        let active = try XCTUnwrap(program.days.first { $0.weekIdx == 1 && $0.dayIdx == 2 })
+        let activeDate = try XCTUnwrap(active.date)
+        try WorkoutSession.start(active, context: context)
+        let newStart = try XCTUnwrap(calendar.date(byAdding: .day, value: 3, to: start))
+        let preview = try WorkoutSession.upcomingShift(program, to: newStart, now: now)
+        XCTAssertFalse(preview.isEmpty)
+        XCTAssertTrue(preview.allSatisfy { $0.day.date == $0.oldDate })
+        try WorkoutSession.shiftUpcoming(program, to: newStart, context: context, now: now)
+        XCTAssertTrue(preview.allSatisfy { $0.day.date == $0.newDate })
+        XCTAssertEqual(missed.date, start)
+        XCTAssertEqual(active.date, activeDate)
+    }
+
     func testBackupRoundTripPreservesGraphAndInvalidImportPreservesData() async throws {
         let store = try container()
         let context = store.mainContext

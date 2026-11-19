@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct TodayView: View {
+    @Environment(\.modelContext) private var context
     @Query(sort: \DayPlan.date) private var allDays: [DayPlan]
     @Query private var programs: [Program]
     private var days: [DayPlan] { allDays.filter { !$0.program.isArchived } }
@@ -9,6 +10,9 @@ struct TodayView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var currentDate = Date()
     @State private var restartFrom: Program?
+    @State private var rescheduling: DayPlan?
+    @State private var confirmingSkip = false
+    @State private var skipError: String?
 
     var body: some View {
         NavigationStack {
@@ -43,6 +47,9 @@ struct TodayView: View {
                         }
                         .coachCard()
                     }
+                    if let missedWorkout {
+                        missedCard(missedWorkout)
+                    }
                     if !laterWorkouts.isEmpty {
                         Text("Coming up").font(.title3.bold()).accessibilityAddTraits(.isHeader)
                         ForEach(laterWorkouts) { day in
@@ -72,8 +79,40 @@ struct TodayView: View {
             .coachBackground()
             .navigationTitle("Today")
             .sheet(item: $restartFrom) { StartDateSetupView(previous: $0) }
+            .sheet(item: $rescheduling) { WorkoutRescheduleSheet(day: $0) }
+            .alert("Skip this missed workout?", isPresented: $confirmingSkip, presenting: missedWorkout) { day in
+                Button("Skip workout", role: .destructive) {
+                    do { try WorkoutSession.skip(day, context: context) }
+                    catch { skipError = error.localizedDescription }
+                }
+                Button("Keep workout", role: .cancel) {}
+            } message: { _ in
+                Text("Your other workouts keep their dates.")
+            }
+            .alert("Could not skip workout", isPresented: Binding(get: { skipError != nil },
+                                                                  set: { if !$0 { skipError = nil } })) {
+                Button("OK") { skipError = nil }
+            } message: { Text(skipError ?? "") }
             .onChange(of: scenePhase) { _, phase in if phase == .active { currentDate = Date() } }
         }
+    }
+
+    private func missedCard(_ day: DayPlan) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Label("Missed workout", systemImage: "calendar.badge.exclamationmark")
+                .font(.headline).accessibilityAddTraits(.isHeader)
+            Text("Week \(day.weekIdx) · \(day.workoutTitle)")
+            if let date = day.date {
+                Text(date.formatted(date: .abbreviated, time: .omitted))
+                    .font(.subheadline).foregroundStyle(CoachStyle.muted)
+            }
+            Button("Reschedule", systemImage: "calendar") { rescheduling = day }
+                .buttonStyle(CoachActionStyle(primary: false))
+            Button("Skip workout") { confirmingSkip = true }
+                .font(.subheadline.weight(.semibold))
+                .frame(minHeight: 44)
+        }
+        .coachCard()
     }
 
     private func workoutCard(_ day: DayPlan, eyebrow: String, action: String) -> some View {
@@ -81,7 +120,7 @@ struct TodayView: View {
             Label(eyebrow, systemImage: "bolt.fill")
                 .font(.caption.weight(.bold)).tracking(1)
                 .foregroundStyle(CoachStyle.accent)
-            Text(day.isDeload ? "Deload · Day \(day.dayIdx)" : "Week \(day.weekIdx) · Day \(day.dayIdx)")
+            Text(day.isDeload ? "Deload · \(day.workoutTitle)" : "Week \(day.weekIdx) · \(day.workoutTitle)")
                 .font(.title.weight(.bold)).accessibilityAddTraits(.isHeader)
             if let date = day.date, !Calendar.current.isDate(date, inSameDayAs: currentDate) {
                 Text(date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
@@ -111,6 +150,14 @@ struct TodayView: View {
     }
 
     private var nextWorkout: DayPlan? { upcoming.first }
+
+    private var missedWorkout: DayPlan? {
+        guard activeProgram?.stage(now: currentDate) != .readyForNextTrack else { return nil }
+        let today = Calendar.current.startOfDay(for: currentDate)
+        return days.last { day in
+            day.status == .planned && !day.hasResults && day.date.map { $0 < today } == true
+        }
+    }
 
     private var laterWorkouts: [DayPlan] {
         let hasCurrentWorkout = days.contains { $0.status == .inProgress || isToday($0) }

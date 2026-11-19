@@ -22,16 +22,28 @@ final class UltimateCoachUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["You set this target."].waitForExistence(timeout: 5))
         if !app.buttons["Start workout"].isHittable { app.swipeDown() }
         app.buttons["Start workout"].tap()
-        let logger = app.buttons["exerciseAction_0"]
+        let logger = app.buttons["Log next set"]
         XCTAssertTrue(logger.waitForExistence(timeout: 5))
         if !logger.isHittable { app.swipeUp() }
         logger.tap()
         XCTAssertTrue(app.textFields["weightInput"].waitForExistence(timeout: 5))
         capture("Dark set logger", app: app)
+        app.buttons["saveSet"].tap()
+        XCTAssertTrue(app.buttons["Add 30 seconds"].waitForExistence(timeout: 5))
+        app.buttons["Add 30 seconds"].tap()
+        app.buttons["Undo last set"].tap()
+        XCTAssertEqual(app.buttons["saveSet"].label, "Save set 1")
         for _ in 0..<4 { app.buttons["saveSet"].tap() }
         XCTAssertTrue(app.staticTexts["All 4 sets saved"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["saveSet"].exists)
+        app.buttons["Next exercise"].tap()
+        XCTAssertTrue(app.staticTexts["Barbell Row"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["saveSet"].label, "Save set 1")
         app.buttons["Done"].firstMatch.tap()
+        let endRest = app.buttons["End rest"]
+        XCTAssertTrue(endRest.waitForExistence(timeout: 5))
+        endRest.tap()
+        XCTAssertTrue(endRest.waitForNonExistence(timeout: 5))
         app.navigationBars.buttons["Today"].tap()
         XCTAssertTrue(app.buttons["Resume workout"].waitForExistence(timeout: 5))
         app.buttons["Resume workout"].tap()
@@ -82,6 +94,15 @@ final class UltimateCoachUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Open workout"].waitForExistence(timeout: 5))
         app.buttons["Open workout"].tap()
         XCTAssertTrue(app.staticTexts["3 sets · 3–5 reps"].exists)
+        let options = app.buttons["Options for Bench Press"]
+        for _ in 0..<3 where !options.isHittable { app.swipeUp() }
+        options.tap()
+        app.buttons["Swap exercise"].tap()
+        let pushUp = app.buttons.containing(.staticText, identifier: "Push-Up").firstMatch
+        XCTAssertTrue(pushUp.waitForExistence(timeout: 5))
+        pushUp.tap()
+        app.buttons["Swap"].tap()
+        XCTAssertTrue(app.staticTexts["Push-Up"].waitForExistence(timeout: 5))
         app.tabBars.buttons["Program"].tap()
         XCTAssertTrue(app.staticTexts["Strength"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Day 1 · Mixed Upper"].exists)
@@ -160,6 +181,22 @@ final class UltimateCoachUITests: XCTestCase {
         create.tap()
         XCTAssertTrue(app.staticTexts["Hypertrophy"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Day 1 · Mixed Upper"].exists)
+    }
+
+    @MainActor
+    func testMissedWorkoutCanBeMovedToTheSuggestedOpenDateFromToday() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--missed-workout"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Missed workout"].waitForExistence(timeout: 10))
+        let reschedule = app.buttons["Reschedule"]
+        for _ in 0..<4 where !reschedule.isHittable { app.swipeUp() }
+        reschedule.tap()
+        let save = app.navigationBars["Reschedule"].buttons["Save"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        save.tap()
+        XCTAssertTrue(app.staticTexts["Missed workout"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Open workout"].exists)
     }
 
     @MainActor

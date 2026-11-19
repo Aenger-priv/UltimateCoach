@@ -64,11 +64,28 @@ final class DayPlan {
     var activityDate: Date? {
         finishedAt ?? (exercises.flatMap(\.logs).map(\.timestamp) + [conditioning?.loggedAt].compactMap { $0 }).max()
     }
+    var workoutTitle: String {
+        let focus: String
+        switch (program.track, dayIdx) {
+        case (nil, 1): focus = "Upper Push"
+        case (nil, 3): focus = "Upper Pull"
+        case (_, 2), (_?, 6): focus = "Lower Body"
+        case (nil, 5), (_?, 1), (_?, 4): focus = "Mixed Upper"
+        default: return "Day \(dayIdx)"
+        }
+        return "Day \(dayIdx) · \(focus)"
+    }
     var status: WorkoutStatus {
         if skippedAt != nil { return .skipped }
         if finishedAt != nil { return .finished }
         if startedAt != nil { return .inProgress }
         return .planned
+    }
+
+    func nextExercise(excluding current: DayExercise? = nil) -> DayExercise? {
+        guard status == .inProgress else { return nil }
+        return exercises.filter { $0 !== current && $0.logs.count < $0.sets }
+            .min { $0.orderIdx < $1.orderIdx }
     }
 
     init(program: Program, weekIdx: Int, dayIdx: Int) {

@@ -3,6 +3,7 @@ import SwiftData
 
 @main
 struct UltimateCoachApp: App {
+    @UIApplicationDelegateAdaptor(RestWhistle.self) private var restWhistle
     @State private var store: Result<ModelContainer, any Error> = Result { try makeStore() }
 
     var body: some Scene {
@@ -43,6 +44,9 @@ struct UltimateCoachApp: App {
         #if DEBUG
         if testStore, ProcessInfo.processInfo.arguments.contains("--expired-cycle") {
             let start = Calendar.current.date(byAdding: .day, value: -100, to: .now) ?? .distantPast
+            try SeedData.startCycle(.hypertrophy, starts: start, context: container.mainContext)
+        } else if testStore, ProcessInfo.processInfo.arguments.contains("--missed-workout") {
+            let start = Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now
             try SeedData.startCycle(.hypertrophy, starts: start, context: container.mainContext)
         }
         #endif
