@@ -5,16 +5,20 @@ struct LoggerSheetView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Environment(\.locale) private var locale
+    @Environment(\.dynamicTypeSize) private var typeSize
     @AppStorage("units_kg") private var unitsKg = true
     @AppStorage("barbell_inc") private var barbellInc = 2.5
     @AppStorage("db_inc") private var dbInc = 2.0
     @AppStorage("enable_rir") private var enableRIR = true
     let exercise: DayExercise
+    @Binding var lastSaved: WorkoutLogging.SavedSet?
+    let onNext: (() -> Void)?
     @State private var weightText = ""
     @State private var reps = 8
     @State private var rir = 2.0
     @State private var recordEffort = false
     @State private var nextTarget: Target?
+    @State private var previousSet: ExerciseLog?
     @State private var errorMessage: String?
     @State private var editing: ExerciseLog?
     @State private var scrollTarget: String?
@@ -23,6 +27,9 @@ struct LoggerSheetView: View {
     private var canLog: Bool { exercise.day.status == .inProgress && exercise.logs.count < exercise.sets }
     private var increment: Double { exercise.template.equipment == "barbell" ? barbellInc : dbInc }
     private var sortedLogs: [ExerciseLog] { exercise.logs.sorted { $0.setIdx < $1.setIdx } }
+    private var canUndo: Bool {
+        editing == nil && exercise.day.status == .inProgress && lastSaved?.log.dayExercise === exercise
+    }
 
     var body: some View {
         NavigationStack {
@@ -42,11 +49,21 @@ struct LoggerSheetView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if exercise.day.status == .inProgress, !weightFocused, let deadline = exercise.day.restUntil {
+                    RestTimer(deadline: deadline, onExtend: extendTimer, onEnd: clearTimer)
+                }
+            }
             .safeAreaInset(edge: .bottom) { saveBar }
             .alert("Could not save", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
                 Button("OK") { errorMessage = nil }
             } message: { Text(errorMessage ?? "") }
-            .onAppear { fill(from: sortedLogs.last) }
+            .onAppear {
+                fill(from: sortedLogs.last)
+                if exercise.day.status == .inProgress {
+                    previousSet = try? WorkoutLogging.previousSet(for: exercise, context: context)
+                }
+            }
         }
     }
 
@@ -54,11 +71,20 @@ struct LoggerSheetView: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 9) {
                 Text(exercise.template.name).font(.title2.bold()).accessibilityAddTraits(.isHeader)
-                Text("Target").font(.subheadline.weight(.semibold)).foregroundStyle(CoachStyle.accent)
-                Text("\(exercise.sets) sets of \(exercise.targetRepsMin)–\(exercise.targetRepsMax) reps")
-                Text(exercise.targetWeight.map { WeightUnit.formatted($0, useKilograms: unitsKg) } ?? "Bodyweight")
-                    .foregroundStyle(CoachStyle.muted)
-                    .font(.subheadline)
+                if let previousSet {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 20) {
+                            target.fixedSize()
+                            lastWorkout(previousSet).fixedSize()
+                        }
+                        VStack(alignment: .leading, spacing: 10) {
+                            target
+                            lastWorkout(previousSet)
+                        }
+                    }
+                } else {
+                    target
+                }
                 if exercise.day.program.track != nil || exercise.day.isDeload {
                     Text(exercise.day.isDeload ? "Aim for 4 or more reps in reserve" : "Aim for around 2 reps in reserve")
                         .font(.footnote).foregroundStyle(CoachStyle.muted)
@@ -72,14 +98,11 @@ struct LoggerSheetView: View {
                     Label("All \(exercise.sets) sets saved", systemImage: "checkmark.circle.fill")
                         .font(.headline).foregroundStyle(CoachStyle.accent)
                     if let target = nextTarget {
-                        Text("Next target: \(target.repMin)–\(target.repMax) reps" +
+                        Text("Next target · \(target.repMin)–\(target.repMax) reps" +
                              (target.weight.map { " · " + WeightUnit.formatted($0, useKilograms: unitsKg) } ?? ""))
                     }
                 }
                 .coachCard()
-            }
-            if exercise.day.status == .inProgress, let deadline = exercise.day.restUntil {
-                RestTimer(deadline: deadline, onClear: clearTimer).coachCard()
             }
             if !sortedLogs.isEmpty { savedSets.id("savedSets") }
         }
@@ -88,18 +111,61 @@ struct LoggerSheetView: View {
 
     @ViewBuilder
     private var saveBar: some View {
-        if canLog || editing != nil {
-            Button(editing == nil ? "Save set \(exercise.logs.count + 1)" : "Save changes", systemImage: "checkmark") {
-                saveSet()
+        if canLog || editing != nil || onNext != nil || canUndo {
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 10))
+            layout {
+                if canUndo {
+                    Button(action: undoSet) {
+                        Text("Undo")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .accessibilityLabel("Undo last set")
+                }
+                if canLog || editing != nil {
+                    Button(editing == nil ? "Save set \(exercise.logs.count + 1)" : "Save changes",
+                           systemImage: "checkmark", action: saveSet)
+                        .buttonStyle(CoachActionStyle())
+                        .accessibilityIdentifier("saveSet")
+                } else if let onNext {
+                    Button("Next exercise", systemImage: "arrow.right", action: onNext)
+                        .buttonStyle(CoachActionStyle())
+                }
             }
-            .buttonStyle(CoachActionStyle())
-            .accessibilityIdentifier("saveSet")
             .padding(.horizontal, 18)
             .padding(.vertical, 8)
             .frame(maxWidth: 656)
             .frame(maxWidth: .infinity)
             .background(.bar)
+            .animation(nil, value: canUndo)
+            .animation(nil, value: exercise.logs.count)
         }
+    }
+
+    private var target: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Target").font(.subheadline.weight(.semibold)).foregroundStyle(CoachStyle.accent)
+            Text("\(exercise.sets) sets of \(exercise.targetRepsMin)–\(exercise.targetRepsMax) reps")
+            Text(exercise.targetWeight.map { WeightUnit.formatted($0, useKilograms: unitsKg) } ?? "Bodyweight")
+                .foregroundStyle(CoachStyle.muted)
+                .font(.subheadline)
+        }
+    }
+
+    private func lastWorkout(_ log: ExerciseLog) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Last workout").font(.subheadline.weight(.semibold))
+            Text(setSummary(log))
+            Text(log.timestamp.formatted(date: .abbreviated, time: .omitted)).font(.subheadline)
+        }
+        .foregroundStyle(CoachStyle.muted)
+    }
+
+    private func setSummary(_ log: ExerciseLog) -> String {
+        let reps = "\(log.reps) reps"
+        guard let weight = log.actualWeight, weight > 0 else { return reps }
+        return "\(WeightUnit.formatted(weight, useKilograms: unitsKg)) × \(reps)"
     }
 
     private var entry: some View {
@@ -161,12 +227,12 @@ struct LoggerSheetView: View {
             ForEach(sortedLogs) { log in
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Set \(log.setIdx)").font(.subheadline.weight(.semibold))
-                    Text("\(log.reps) reps · \(WeightUnit.formatted(log.actualWeight ?? 0, useKilograms: unitsKg))")
+                    Text(setSummary(log))
                         .foregroundStyle(CoachStyle.muted)
                     if exercise.day.status != .skipped {
                         Button("Edit set \(log.setIdx)") {
                             editing = log
-                            fill(from: log)
+                            fill(from: log, includeEffort: true)
                             scrollTarget = "setEntry"
                         }
                             .font(.subheadline.weight(.semibold))
@@ -182,15 +248,15 @@ struct LoggerSheetView: View {
         try? FloatingPointFormatStyle<Double>.number.locale(locale).parseStrategy.parse(weightText.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    private func fill(from log: ExerciseLog?) {
+    private func fill(from log: ExerciseLog?, includeEffort: Bool = false) {
         let kg = log?.actualWeight ?? exercise.targetWeight ?? 0
         weightText = WeightUnit.display(kg, useKilograms: unitsKg)
             .formatted(.number.locale(locale).grouping(.never).precision(.fractionLength(0...3)))
         reps = log?.reps ?? exercise.targetRepsMin
         if reps > 100 { reps = 100 }
         let reserve = exercise.day.isDeload ? 4.0 : (exercise.day.program.track == nil && exercise.phase == "STR" ? 1 : 2)
-        rir = log?.rir ?? reserve
-        recordEffort = log?.rir != nil
+        rir = (includeEffort ? log?.rir : nil) ?? reserve
+        recordEffort = includeEffort && log?.rir != nil
     }
 
     private func adjustWeight(by delta: Double) {
@@ -200,9 +266,27 @@ struct LoggerSheetView: View {
     }
 
     private func clearTimer() {
-        exercise.day.restUntil = nil
-        do { try context.save() }
-        catch { context.rollback(); errorMessage = error.localizedDescription }
+        do { try WorkoutSession.endRest(exercise.day, context: context) }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    private func extendTimer() {
+        do { try WorkoutSession.extendRest(exercise.day, context: context) }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    private func undoSet() {
+        guard let lastSaved else { return }
+        fill(from: lastSaved.log, includeEffort: true)
+        do {
+            try WorkoutLogging.undo(lastSaved, context: context)
+            self.lastSaved = nil
+            nextTarget = nil
+            scrollTarget = "setEntry"
+        } catch {
+            self.lastSaved = nil
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func saveSet() {
@@ -214,10 +298,13 @@ struct LoggerSheetView: View {
                 nextTarget = try WorkoutLogging.editSet(log, kilograms: kg, reps: reps,
                     rir: recordEffort ? rir : nil, barbellIncrement: barbellInc, dumbbellIncrement: dbInc, context: context)
                 editing = nil
+                lastSaved = nil
                 scrollTarget = "savedSets"
             } else {
-                nextTarget = try WorkoutLogging.saveSet(exercise: exercise, kilograms: kg, reps: reps,
+                let saved = try WorkoutLogging.logSet(exercise: exercise, kilograms: kg, reps: reps,
                     rir: recordEffort ? rir : nil, barbellIncrement: barbellInc, dumbbellIncrement: dbInc, context: context)
+                lastSaved = saved
+                nextTarget = saved.nextTarget
             }
             fill(from: sortedLogs.last)
         } catch { errorMessage = error.localizedDescription }

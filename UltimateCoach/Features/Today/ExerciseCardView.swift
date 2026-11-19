@@ -5,13 +5,28 @@ struct ExerciseCardView: View {
     let exercise: DayExercise
     var onLog: () -> Void
     var onEditTarget: () -> Void
+    var onSwap: () -> Void
 
     private var canLog: Bool { exercise.day.status == .inProgress && exercise.logs.count < exercise.sets }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text(exercise.template.name)
-                .font(.headline).accessibilityAddTraits(.isHeader)
+            HStack(alignment: .firstTextBaseline) {
+                Text(exercise.template.name)
+                    .font(.headline).accessibilityAddTraits(.isHeader)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !ExerciseSubstitution.choices(for: exercise).isEmpty {
+                    Spacer(minLength: 4)
+                    Menu {
+                        Button("Swap exercise", systemImage: "arrow.left.arrow.right", action: onSwap)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Options for \(exercise.template.name)")
+                }
+            }
             Text("\(exercise.sets) sets · \(exercise.targetRepsMin)–\(exercise.targetRepsMax) reps")
                 .font(.subheadline).foregroundStyle(CoachStyle.muted)
             if let weight = exercise.targetWeight {

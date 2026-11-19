@@ -48,7 +48,7 @@ struct ProgramScreen: View {
                             .sorted { ($0.date ?? .distantFuture, $0.dayIdx) < ($1.date ?? .distantFuture, $1.dayIdx) }) { day in
                             NavigationLink { WorkoutScreen(day: day) } label: {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(workoutTitle(for: day))
+                                    Text(day.workoutTitle)
                                         .font(.headline)
                                         .fixedSize(horizontal: false, vertical: true)
                                     if let date = day.date { Text(date.formatted(date: .complete, time: .omitted)) }
@@ -104,19 +104,6 @@ struct ProgramScreen: View {
         } catch {
             endError = error.localizedDescription
         }
-    }
-
-    private func workoutTitle(for day: DayPlan) -> String {
-        // The original plan and its deload retain their original weekly slots.
-        let focus: String
-        switch (day.program.track, day.dayIdx) {
-        case (nil, 1): focus = "Upper Push"
-        case (nil, 3): focus = "Upper Pull"
-        case (_, 2), (_?, 6): focus = "Lower Body"
-        case (nil, 5), (_?, 1), (_?, 4): focus = "Mixed Upper"
-        default: return "Day \(day.dayIdx)"
-        }
-        return "Day \(day.dayIdx) · \(focus)"
     }
 
     private func currentWeek(_ program: Program) -> Int {

@@ -18,11 +18,13 @@ Use `xcrun simctl list devices available` to choose another installed simulator.
 
 ## Use the app
 
-- **Today** opens the scheduled workout or resumes the active one.
+- **Today** opens the scheduled workout, resumes the active one, or lets you reschedule or skip a missed workout.
 - **Program** shows 12 training weeks and a lighter Week 13. Rescheduling moves only the selected workout. Use **End program early** at the bottom of the tab to archive the current cycle and choose a fresh start.
-- **Workout** separates targets, saved sets, and conditioning. Enter or adjust weight, log reps, optionally record reps in reserve, and finish when done. The rest timer follows the active session. Seed loads are examples. Next-workout targets explain why they changed.
+- **Workout** puts **Log next set** within reach. Review the target and your previous set, adjust the prefilled weight and reps, then save. You can undo the latest set or move to the next exercise from the logger. Add 30 seconds or end rest from the timer bar. Use an exercise’s menu to swap it before logging. The finished workout shows saved work and upcoming weight changes.
 - **Progress** shows workout history and trends for logged exercises. Charts show logged weights or bodyweight reps, with an optional estimated 1-rep max for weighted exercises. Deloads stay in history. Open a workout to correct individual sets.
-- **Settings** sets weight units and increments, moves upcoming sessions, and exports or restores workout backups. Backups include the current cycle, archived cycles, and workout data. Preferences are stored separately.
+- **Settings** sets weight units and increments, previews schedule moves, and exports or restores backups. The optional coach whistle under **Rest timer** uses iPhone notifications, including when the screen is locked. Preferences are stored separately from workout backups.
+
+The rest whistle is a shortened, quieter edit of [Referee whistle blow, gymnasium.wav by SpliceSound](https://freesound.org/people/SpliceSound/sounds/218318/), released under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 
 Choose Hypertrophy or Strength before starting. After the deload, the app suggests the opposite track and lets you choose either one. See the [programming and research notes](docs/TRAINING_TRACKS.md) and [original revival audit](docs/REVIVAL_PLAN.md).
 

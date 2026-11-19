@@ -9,6 +9,8 @@ struct SettingsView: View {
     @AppStorage("barbell_inc") private var barbellInc = 2.5
     @AppStorage("db_inc") private var dbInc = 2.0
     @AppStorage("enable_rir") private var enableRIR = true
+    @AppStorage("rest_whistle") private var restWhistle = false
+    @State private var requestingNotifications = false
     @State private var backup: BackupDocument?
     @State private var showingExporter = false
     @State private var showingImporter = false
@@ -16,8 +18,7 @@ struct SettingsView: View {
     @State private var importName = ""
     @State private var confirmingImport = false
     @State private var message: String?
-    @State private var showingSchedule = false
-    @State private var startDate = Date()
+    @State private var shiftingProgram: Program?
 
     var body: some View {
         NavigationStack {
@@ -39,9 +40,18 @@ struct SettingsView: View {
                     Text("Record how many more reps you could have completed.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                if programs.contains(where: { !$0.isArchived }) {
+                Section {
+                    Toggle("Whistle when rest ends", isOn: Binding(get: { restWhistle }, set: setWhistle))
+                        .disabled(requestingNotifications)
+                    Button("Preview whistle", systemImage: "speaker.wave.2") { RestWhistle.preview() }
+                } header: {
+                    Text("Rest timer")
+                } footer: {
+                    Text("The whistle uses your iPhone’s notification sound settings.")
+                }
+                if let program = programs.first(where: { !$0.isArchived }) {
                     Section("Program") {
-                        Button("Move upcoming workouts", systemImage: "calendar") { showingSchedule = true }
+                        Button("Move upcoming workouts", systemImage: "calendar") { shiftingProgram = program }
                     }
                 }
                 Section("Backup") {
@@ -95,35 +105,24 @@ struct SettingsView: View {
             .alert("UltimateCoach", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
                 Button("OK") { message = nil }
             } message: { Text(message ?? "") }
-            .sheet(isPresented: $showingSchedule) {
-                NavigationStack {
-                    Form {
-                        DatePicker("Program start date", selection: $startDate, displayedComponents: .date)
-                        Text("Shifts future workouts by the change in start date. Active and past workouts keep their dates.")
-                    }
-                    .navigationTitle("Move upcoming workouts")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showingSchedule = false } }
-                        ToolbarItem(placement: .confirmationAction) { Button("Save") { adjustSchedule() } }
-                    }
-                    .onAppear {
-                        if let program = try? context.fetch(FetchDescriptor<Program>()).first(where: { !$0.isArchived }) { startDate = program.startDate }
-                    }
-                }
+            .sheet(item: $shiftingProgram) { ScheduleShiftSheet(program: $0) }
+        }
+    }
+
+    private func setWhistle(_ enabled: Bool) {
+        guard enabled else { restWhistle = false; return }
+        requestingNotifications = true
+        Task {
+            defer { requestingNotifications = false }
+            do {
+                restWhistle = try await RestWhistle.authorize()
+                if !restWhistle { message = "Allow notifications for UltimateCoach in iPhone Settings to use the whistle." }
+            } catch {
+                message = "Could not enable the whistle. " + error.localizedDescription
             }
         }
     }
 
-    private func adjustSchedule() {
-        do {
-            guard let program = try context.fetch(FetchDescriptor<Program>()).first(where: { !$0.isArchived }) else { return }
-            try WorkoutSession.shiftUpcoming(program, to: startDate, context: context)
-            showingSchedule = false
-        } catch {
-            context.rollback()
-            message = "Could not update schedule. " + error.localizedDescription
-        }
-    }
 }
 
 struct BackupDocument: FileDocument {

@@ -15,7 +15,7 @@ final class UltimateCoachUITestsLaunchTests: XCTestCase {
         app.buttons["Open workout"].tap()
         if !app.buttons["Start workout"].isHittable { app.swipeUp() }
         app.buttons["Start workout"].tap()
-        let log = app.buttons["exerciseAction_0"]
+        let log = app.buttons["Log next set"]
         for _ in 0..<4 where !log.isHittable { app.swipeUp() }
         XCTAssertTrue(log.isHittable)
         log.tap()
@@ -30,5 +30,14 @@ final class UltimateCoachUITestsLaunchTests: XCTestCase {
         add(attachment)
         app.buttons["saveSet"].tap()
         XCTAssertEqual(app.buttons["saveSet"].label, "Save set 2")
+        let undo = app.buttons["Undo last set"]
+        XCTAssertTrue(undo.isHittable)
+        XCTAssertFalse(undo.frame.intersects(app.buttons["saveSet"].frame))
+        let timerAttachment = XCTAttachment(screenshot: app.screenshot())
+        timerAttachment.name = "Rest timer and quick logger at largest text size"
+        timerAttachment.lifetime = .keepAlways
+        add(timerAttachment)
+        undo.tap()
+        XCTAssertEqual(app.buttons["saveSet"].label, "Save set 1")
     }
 }
