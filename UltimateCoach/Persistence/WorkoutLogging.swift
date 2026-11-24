@@ -131,7 +131,14 @@ enum WorkoutLogging {
             log.actualWeight = kilograms
             log.reps = reps
             log.rir = rir
-            return try updateTarget(log.dayExercise, barbellIncrement: barbellIncrement, dumbbellIncrement: dumbbellIncrement)
+            let edited = log.dayExercise
+            // A correction can remove the confirmation for the most recent training session.
+            // Recompute only its pending suggestion. Keep every started workout's original prescription.
+            let latest = futureExposures(after: edited).last {
+                !$0.day.isDeload && !$0.logs.isEmpty && ($0.day.status == .inProgress || $0.day.status == .finished)
+            } ?? edited
+            let next = try updateTarget(latest, barbellIncrement: barbellIncrement, dumbbellIncrement: dumbbellIncrement)
+            return latest === edited ? next : nil
         }
     }
 
@@ -176,38 +183,57 @@ enum WorkoutLogging {
         let training = later.filter { !$0.day.isDeload }
         // Editing a past set never rewrites a target once a later exposure has started.
         guard let future = training.first, future.day.status == .planned, future.logs.isEmpty, future.manualTarget != true,
+              future.targetRepsMin == exercise.targetRepsMin, future.targetRepsMax == exercise.targetRepsMax,
+              future.sets == exercise.sets, future.phase == exercise.phase,
               training.allSatisfy({ $0.day.status == .planned && $0.logs.isEmpty }),
               (future.day.date ?? .distantFuture) >= (exercise.day.date ?? .distantPast) else { return nil }
-        var misses = 0
-        for exposure in exposures.reversed() where exposure.day.weekIdx < exercise.day.weekIdx {
-            guard exposure.logs.count == exposure.sets else { break }
-            guard let target = exposure.targetWeight,
-                  exposure.logs.allSatisfy({ ($0.actualWeight ?? 0) + 0.005 >= target }),
-                  exposure.logs.contains(where: { $0.reps < exposure.targetRepsMin }) else { break }
-            misses += 1
+        let current = liftExposure(for: exercise)
+        var previous: [LiftExposure] = []
+        var expectedWeek = exercise.day.weekIdx - 1
+        // A partial, skipped, substituted or reordered session cannot confirm a run of comparable work.
+        var beforeDate = exercise.logs.map(\.timestamp).min() ?? .distantFuture
+        for prior in exposures.reversed() where prior.day.weekIdx < exercise.day.weekIdx {
+            guard prior.day.weekIdx == expectedWeek, prior.day.status == .finished,
+                  let start = prior.logs.map(\.timestamp).min(),
+                  let finish = prior.logs.map(\.timestamp).max(), finish <= beforeDate else { break }
+            previous.append(liftExposure(for: prior))
+            beforeDate = start
+            expectedWeek -= 1
         }
         let defaults = try RuleDefaults.load()
-        let computed = computeNextTargets(
-            lastLogs: exercise.logs.map { SetLog(weight: $0.actualWeight, reps: $0.reps, rir: $0.rir) },
-            lastTarget: Target(weight: exercise.targetWeight, repMin: exercise.targetRepsMin,
-                               repMax: exercise.targetRepsMax, sets: exercise.sets, phase: exercise.phase),
-            rule: Rule(equipment: exercise.template.equipment, barbellInc: barbellIncrement,
-                       dbInc: dumbbellIncrement, deloadPct: defaults.deloadPct, missLimit: defaults.missLimit),
-            phase: exercise.phase, consecutiveMisses: misses, blockStartLoad: nil,
-            minimumReserve: exercise.day.program.track == nil ? nil : 2
-        )
+        let rule = Rule(equipment: exercise.template.equipment, barbellInc: barbellIncrement,
+                        dbInc: dumbbellIncrement, deloadPct: defaults.deloadPct, missLimit: defaults.missLimit)
+        let result = LiftRecommendation.assess(current, previous: previous, rule: rule)
         willChange(future)
-        if (computed.weight ?? 0) > (exercise.targetWeight ?? 0) {
-            future.targetNote = "Load increased after you reached the top of the rep range on every set."
-        } else if (computed.weight ?? 0) < (exercise.targetWeight ?? 0) {
-            future.targetNote = "Load reduced after repeated missed targets."
-        } else {
-            future.targetNote = "Repeating the previous target."
+        future.targetNote = result.reason.guidance
+        future.targetWeight = result.target.weight
+        // A missed week should not put a lifter back on a heavier example load.
+        // Carry this one prescription forward until another logged session revises it.
+        if exercise.day.program.track != nil {
+            for later in training.dropFirst() {
+                guard later.manualTarget != true, later.phase == future.phase, later.sets == future.sets,
+                      later.targetRepsMin == future.targetRepsMin, later.targetRepsMax == future.targetRepsMax,
+                      (later.day.date ?? .distantFuture) >= (exercise.day.date ?? .distantPast) else { break }
+                guard later.targetWeight != result.target.weight else { continue }
+                willChange(later)
+                later.targetWeight = result.target.weight
+                later.targetNote = "Carried forward from your last completed sets in this workout slot."
+            }
         }
-        future.targetWeight = computed.weight
-        future.targetRepsMin = computed.repMin
-        future.targetRepsMax = computed.repMax
-        return computed
+        return Target(weight: future.targetWeight, repMin: future.targetRepsMin, repMax: future.targetRepsMax,
+                      sets: future.sets, phase: future.phase)
+    }
+
+    static func liftExposure(for exercise: DayExercise) -> LiftExposure {
+        let target = Target(weight: exercise.targetWeight, repMin: exercise.targetRepsMin,
+                            repMax: exercise.targetRepsMax, sets: exercise.sets, phase: exercise.phase)
+        let logs = exercise.logs.map { SetLog(weight: $0.actualWeight, reps: $0.reps, rir: $0.rir) }
+        let reserve = exercise.day.program.track == nil && exercise.phase == "STR" ? 1.0 : 2.0
+        return LiftExposure(target: target, logs: logs, reserve: reserve)
+    }
+
+    static func nextTargetNote(after exercise: DayExercise) -> String? {
+        futureExposures(after: exercise).first(where: { !$0.day.isDeload })?.targetNote
     }
 
     private static func updateRecoveryTarget(after exercise: DayExercise, later: [DayExercise],

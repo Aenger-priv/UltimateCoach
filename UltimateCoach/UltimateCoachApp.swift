@@ -42,7 +42,9 @@ struct UltimateCoachApp: App {
                                   ExerciseLog.self, ProgressionRule.self, PhaseState.self, Conditioning.self,
                                   configurations: ModelConfiguration(isStoredInMemoryOnly: testStore))
         #if DEBUG
-        if testStore, ProcessInfo.processInfo.arguments.contains("--expired-cycle") {
+        if testStore, ProcessInfo.processInfo.arguments.contains("--cycle-progress") {
+            try seedCycleProgress(in: container.mainContext)
+        } else if testStore, ProcessInfo.processInfo.arguments.contains("--expired-cycle") {
             let start = Calendar.current.date(byAdding: .day, value: -100, to: .now) ?? .distantPast
             try SeedData.startCycle(.hypertrophy, starts: start, context: container.mainContext)
         } else if testStore, ProcessInfo.processInfo.arguments.contains("--missed-workout") {
@@ -52,4 +54,25 @@ struct UltimateCoachApp: App {
         #endif
         return container
     }
+
+    #if DEBUG
+    private static func seedCycleProgress(in context: ModelContext) throws {
+        let start = Calendar.current.date(byAdding: .day, value: -7, to: .now) ?? .now
+        let program = try SeedData.startCycle(.hypertrophy, starts: start, context: context)
+        for day in program.days where day.dayIdx == 1 && day.weekIdx <= 2 {
+            guard let date = day.date, let bench = day.exercises.first(where: { $0.orderIdx == 0 }),
+                  let conditioning = day.conditioning else { continue }
+            try WorkoutSession.start(day, context: context, now: date)
+            for index in 1...bench.sets {
+                let log = ExerciseLog(dayExercise: bench, setIdx: index, actualWeight: 50,
+                                      reps: day.weekIdx == 1 ? 8 : 9, rir: 2, timestamp: date)
+                context.insert(log)
+                if !bench.logs.contains(where: { $0 === log }) { bench.logs.append(log) }
+            }
+            try WorkoutSession.recordConditioning(conditioning, minutes: 15, meters: day.weekIdx == 1 ? 3000 : 3050,
+                                                  context: context, now: date)
+            try WorkoutSession.finish(day, context: context, now: date)
+        }
+    }
+    #endif
 }

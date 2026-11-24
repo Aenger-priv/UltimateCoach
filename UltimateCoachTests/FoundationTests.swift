@@ -20,8 +20,8 @@ final class FoundationTests: XCTestCase {
         let target = Target(weight: 60, repMin: 8, repMax: 12, sets: 3, phase: "HYP")
         let rule = Rule(equipment: "barbell", barbellInc: 2.5, dbInc: 2, deloadPct: 0.1, missLimit: 3)
         for logs in [[], [SetLog(weight: 60, reps: 12, rir: 2)], Array(repeating: SetLog(weight: 20, reps: 12, rir: 2), count: 3)] {
-            XCTAssertEqual(computeNextTargets(lastLogs: logs, lastTarget: target, rule: rule,
-                phase: "HYP", consecutiveMisses: 0, blockStartLoad: nil), target)
+            let work = LiftExposure(target: target, logs: logs, reserve: 2)
+            XCTAssertEqual(LiftRecommendation.assess(work, previous: [work], rule: rule).target, target)
         }
     }
 
@@ -57,7 +57,8 @@ final class FoundationTests: XCTestCase {
             if index < squat.sets - 1 { XCTAssertNil(next) }
         }
         XCTAssertEqual(squat.logs.count, 4)
-        XCTAssertEqual(nextSquat.targetWeight, 82.5)
+        XCTAssertEqual(nextSquat.targetWeight, 80)
+        XCTAssertEqual(nextSquat.targetNote, LiftRecommendation.Reason.confirmTopSets.guidance)
         XCTAssertThrowsError(try WorkoutLogging.saveSet(exercise: squat, kilograms: 80, reps: 10, rir: 2,
             barbellIncrement: 2.5, dumbbellIncrement: 2, context: context))
         XCTAssertEqual(squat.logs.count, 4)
@@ -67,9 +68,17 @@ final class FoundationTests: XCTestCase {
         let store = try container()
         let context = store.mainContext
         let program = try SeedData.startCycle(.hypertrophy, starts: .now, context: context)
-        let exercise = try XCTUnwrap(program.days.first { $0.weekIdx == 1 && $0.dayIdx == 1 }?
+        let first = try XCTUnwrap(program.days.first { $0.weekIdx == 1 && $0.dayIdx == 1 }?
             .exercises.first { $0.template.name == "Bench Press" })
-        let next = try XCTUnwrap(program.days.first { $0.weekIdx == 2 && $0.dayIdx == 1 }?
+        try WorkoutSession.start(first.day, context: context)
+        for _ in 0..<first.sets {
+            try WorkoutLogging.saveSet(exercise: first, kilograms: 50, reps: 12, rir: 2,
+                barbellIncrement: 2.5, dumbbellIncrement: 2, context: context)
+        }
+        try WorkoutSession.finish(first.day, context: context)
+        let exercise = try XCTUnwrap(program.days.first { $0.weekIdx == 2 && $0.dayIdx == 1 }?
+            .exercises.first { $0.template.name == "Bench Press" })
+        let next = try XCTUnwrap(program.days.first { $0.weekIdx == 3 && $0.dayIdx == 1 }?
             .exercises.first { $0.template === exercise.template })
         let deload = try XCTUnwrap(program.days.first { $0.isDeload && $0.dayIdx == 1 }?
             .exercises.first { $0.template === exercise.template })
@@ -89,7 +98,7 @@ final class FoundationTests: XCTestCase {
         XCTAssertEqual(WorkoutLogging.changedTargets(after: exercise.day).map(\.targetWeight), [52.5])
         try WorkoutLogging.undo(last, context: context)
         XCTAssertEqual(exercise.logs.count, exercise.sets - 1)
-        XCTAssertEqual(try context.fetchCount(FetchDescriptor<ExerciseLog>()), exercise.sets - 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<ExerciseLog>()), first.sets + exercise.sets - 1)
         XCTAssertEqual(exercise.day.restUntil, longerRest)
         XCTAssertEqual(next.targetWeight, 50)
         XCTAssertNil(next.targetNote)
@@ -98,6 +107,49 @@ final class FoundationTests: XCTestCase {
         XCTAssertThrowsError(try WorkoutLogging.undo(last, context: context))
         try WorkoutSession.endRest(exercise.day, context: context)
         XCTAssertNil(exercise.day.restUntil)
+    }
+
+    func testCorrectingFirstConfirmationAfterSecondWorkoutOnlyRecalculatesUpcomingLoad() throws {
+        let store = try container()
+        let context = store.mainContext
+        let program = try SeedData.startCycle(.strength, starts: .now, context: context)
+        let bench = program.days.filter { $0.dayIdx == 1 && !$0.isDeload }.sorted { $0.weekIdx < $1.weekIdx }
+            .compactMap { day in day.exercises.first { $0.template.name == "Bench Press" } }
+        for exercise in bench.prefix(2) {
+            try WorkoutSession.start(exercise.day, context: context)
+            for _ in 0..<exercise.sets {
+                try WorkoutLogging.saveSet(exercise: exercise, kilograms: 50, reps: 5, rir: 2,
+                    barbellIncrement: 2.5, dumbbellIncrement: 2, context: context)
+            }
+            try WorkoutSession.finish(exercise.day, context: context)
+        }
+        XCTAssertEqual(bench[2].targetWeight, 52.5)
+        let edited = try XCTUnwrap(bench[0].logs.first)
+        try WorkoutLogging.editSet(edited, kilograms: 50, reps: 4, rir: 2,
+            barbellIncrement: 2.5, dumbbellIncrement: 2, context: context)
+        XCTAssertEqual(bench[1].targetWeight, 50)
+        XCTAssertEqual(bench[2].targetWeight, 50)
+        XCTAssertEqual(bench[2].targetNote, LiftRecommendation.Reason.confirmTopSets.guidance)
+    }
+
+    func testMissingAWeekDoesNotRestoreAHeavierExampleLoad() throws {
+        let store = try container()
+        let context = store.mainContext
+        let program = try SeedData.startCycle(.strength, starts: .now, context: context)
+        let benches = program.days.filter { $0.dayIdx == 1 && !$0.isDeload }.sorted { $0.weekIdx < $1.weekIdx }
+            .compactMap { $0.exercises.first { $0.template.name == "Bench Press" } }
+        let first = try XCTUnwrap(benches.first)
+        try WorkoutSession.setPlannedLoad(first, kilograms: 25, context: context)
+        try WorkoutSession.setPlannedLoad(benches[3], kilograms: 35, context: context)
+        try WorkoutSession.start(first.day, context: context)
+        for _ in 0..<first.sets {
+            try WorkoutLogging.saveSet(exercise: first, kilograms: 25, reps: 4, rir: 2,
+                                       barbellIncrement: 2.5, dumbbellIncrement: 2, context: context)
+        }
+        try WorkoutSession.finish(first.day, context: context)
+        try WorkoutSession.skip(benches[1].day, context: context)
+        XCTAssertEqual(benches[2].targetWeight, 25)
+        XCTAssertEqual(benches[3].targetWeight, 35)
     }
 
     func testExerciseSwapKeepsOneOffLogsSeparateAndUpdatesOnlyTheSelectedFutureSlot() throws {
@@ -251,13 +303,15 @@ final class FoundationTests: XCTestCase {
             try WorkoutLogging.saveSet(exercise: first, kilograms: 60, reps: 12, rir: 2,
                 barbellIncrement: 2.5, dumbbellIncrement: 2, context: context)
         }
-        XCTAssertEqual(next.targetWeight, 62.5)
+        XCTAssertEqual(next.targetWeight, 60)
+        XCTAssertEqual(next.targetNote, LiftRecommendation.Reason.confirmTopSets.guidance)
         try WorkoutSession.finish(first.day, context: context)
         let log = try XCTUnwrap(first.logs.first)
         let timestamp = log.timestamp
         try WorkoutLogging.editSet(log, kilograms: 60, reps: 8, rir: 2, barbellIncrement: 2.5,
             dumbbellIncrement: 2, context: context)
         XCTAssertEqual(next.targetWeight, 60)
+        XCTAssertEqual(next.targetNote, LiftRecommendation.Reason.buildReps.guidance)
         XCTAssertEqual(log.timestamp, timestamp)
     }
 }
