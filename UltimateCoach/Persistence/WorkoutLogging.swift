@@ -60,16 +60,22 @@ enum WorkoutLogging {
     }
 
     static func logSet(exercise: DayExercise, kilograms: Double, reps: Int, rir: Double?,
-                       barbellIncrement: Double, dumbbellIncrement: Double, context: ModelContext) throws -> SavedSet {
+                       barbellIncrement: Double, dumbbellIncrement: Double, context: ModelContext,
+                       adaptiveRest: Bool = false, restDraw: () -> Double = { Double.random(in: 0..<1) }) throws -> SavedSet {
         guard exercise.day.status == .inProgress else { throw LoggingError.closedWorkout }
         guard exercise.logs.count < exercise.sets else { throw LoggingError.completed }
         try validate(kilograms: kilograms, reps: reps, rir: rir)
         return try transaction(context) {
             let previousRest = exercise.day.restUntil
             let index = (exercise.logs.map(\.setIdx).max() ?? 0) + 1
+            let priorSet = adaptiveRest ? exercise.day.latestLoggedSet : nil
             let log = ExerciseLog(dayExercise: exercise, setIdx: index, actualWeight: kilograms, reps: reps, rir: rir)
             context.insert(log)
             if !exercise.logs.contains(where: { $0 === log }) { exercise.logs.append(log) }
+            if adaptiveRest {
+                AdaptiveRest.linkFollowUp(log, previous: priorSet)
+                AdaptiveRest.assign(after: log, draw: restDraw())
+            }
             exercise.day.restUntil = log.timestamp.addingTimeInterval(Double(max(0, exercise.restSeconds)))
             var before: [(DayExercise, TargetSnapshot)] = []
             let next = try updateTarget(exercise, barbellIncrement: barbellIncrement, dumbbellIncrement: dumbbellIncrement) {

@@ -4,6 +4,24 @@ final class UltimateCoachUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
     @MainActor
+    func testAdaptiveRestOfferCanBeUsedOnceAndOrdinaryControlRemainsAvailable() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--rest-offer", "-adaptive_rest", "YES"]
+        app.launch()
+        let resume = app.buttons["Resume workout"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 8))
+        resume.tap()
+        XCTAssertTrue(app.buttons["Suggested: add 30 seconds"].exists)
+        app.buttons["Log next set"].tap()
+        let offer = app.buttons["Suggested: add 30 seconds"]
+        XCTAssertTrue(offer.waitForExistence(timeout: 5))
+        offer.tap()
+        XCTAssertTrue(app.buttons["Add 30 seconds"].waitForExistence(timeout: 5))
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Add 30 seconds"].isHittable)
+    }
+
+    @MainActor
     func testOnboardingLoggingResumeAndHistory() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]

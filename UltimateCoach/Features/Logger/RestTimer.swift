@@ -3,6 +3,7 @@ import SwiftUI
 struct RestTimer: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     let deadline: Date
+    var suggestion = false
     let onExtend: () -> Void
     let onEnd: () -> Void
 
@@ -48,9 +49,9 @@ struct RestTimer: View {
     private var controls: some View {
         HStack(spacing: 8) {
             Button(action: onExtend) {
-                Text("+30 sec").fixedSize(horizontal: false, vertical: true).frame(minHeight: 44)
+                Text(suggestion ? "Suggested +30 sec" : "+30 sec").fixedSize(horizontal: false, vertical: true).frame(minHeight: 44)
             }
-            .accessibilityLabel("Add 30 seconds")
+            .accessibilityLabel(suggestion ? "Suggested: add 30 seconds" : "Add 30 seconds")
             Button(action: onEnd) {
                 Text("End rest").fixedSize(horizontal: false, vertical: true).frame(minHeight: 44)
             }

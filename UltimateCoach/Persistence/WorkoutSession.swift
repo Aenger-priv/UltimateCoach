@@ -41,9 +41,12 @@ enum WorkoutSession {
         try save(context)
     }
 
-    static func extendRest(_ day: DayPlan, context: ModelContext, now: Date = .now) throws {
+    static func extendRest(_ day: DayPlan, context: ModelContext, now: Date = .now, adaptiveRest: Bool = false) throws {
         guard day.status == .inProgress, let deadline = day.restUntil, deadline > now else {
             throw SessionError.invalidStatus
+        }
+        if adaptiveRest, let log = day.latestLoggedSet, log.restOffered != nil {
+            log.restExtended = true
         }
         day.restUntil = deadline.addingTimeInterval(30)
         try save(context)

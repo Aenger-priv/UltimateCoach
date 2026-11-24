@@ -3,6 +3,7 @@ import SwiftData
 
 struct LoggerSheetView: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("adaptive_rest") private var adaptiveRest = false
     @Environment(\.modelContext) private var context
     @Environment(\.locale) private var locale
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -51,7 +52,7 @@ struct LoggerSheetView: View {
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 if exercise.day.status == .inProgress, !weightFocused, let deadline = exercise.day.restUntil {
-                    RestTimer(deadline: deadline, onExtend: extendTimer, onEnd: clearTimer)
+                    RestTimer(deadline: deadline, suggestion: adaptiveRest && exercise.day.hasRestSuggestion, onExtend: extendTimer, onEnd: clearTimer)
                 }
             }
             .safeAreaInset(edge: .bottom) { saveBar }
@@ -294,7 +295,7 @@ struct LoggerSheetView: View {
     }
 
     private func extendTimer() {
-        do { try WorkoutSession.extendRest(exercise.day, context: context) }
+        do { try WorkoutSession.extendRest(exercise.day, context: context, adaptiveRest: adaptiveRest) }
         catch { errorMessage = error.localizedDescription }
     }
 
@@ -325,7 +326,7 @@ struct LoggerSheetView: View {
                 scrollTarget = "savedSets"
             } else {
                 let saved = try WorkoutLogging.logSet(exercise: exercise, kilograms: kg, reps: reps,
-                    rir: recordEffort ? rir : nil, barbellIncrement: barbellInc, dumbbellIncrement: dbInc, context: context)
+                    rir: recordEffort ? rir : nil, barbellIncrement: barbellInc, dumbbellIncrement: dbInc, context: context, adaptiveRest: adaptiveRest)
                 lastSaved = saved
                 nextTarget = saved.nextTarget
             }

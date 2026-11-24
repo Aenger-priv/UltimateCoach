@@ -46,7 +46,17 @@ struct ExportImport {
         var manualTarget: Bool? = nil
         var plannedRestSeconds: Int? = nil
     }
-    struct ExportLog: Codable { let setIdx: Int; let actualWeight: Double?; let reps: Int; let rir: Double?; let timestamp: Date }
+    struct ExportLog: Codable {
+        let setIdx: Int
+        let actualWeight: Double?
+        let reps: Int
+        let rir: Double?
+        let timestamp: Date
+        var restOfferProbability: Double?
+        var restOffered: Bool?
+        var restExtended: Bool?
+        var restFollowUp: Bool?
+    }
     struct ExportConditioning: Codable {
         let type: String
         let protocolText: String
@@ -142,7 +152,9 @@ struct ExportImport {
         let duplicateIndices = Set(ordered.map(\.setIdx)).count != ordered.count
         return ordered.enumerated().map { index, log in
             ExportLog(setIdx: duplicateIndices ? index + 1 : log.setIdx, actualWeight: log.actualWeight,
-                      reps: log.reps, rir: log.rir, timestamp: log.timestamp)
+                      reps: log.reps, rir: log.rir, timestamp: log.timestamp,
+                      restOfferProbability: log.restOfferProbability, restOffered: log.restOffered,
+                      restExtended: log.restExtended, restFollowUp: log.restFollowUp)
         }
     }
 
@@ -209,6 +221,8 @@ struct ExportImport {
                     guard (1...100_000).contains(log.setIdx),
                           (indexes.insert(log.setIdx).inserted || (root.formatVersion ?? 1) == 1), log.reps > 0,
                           log.actualWeight.map({ $0.isFinite && $0 >= 0 }) ?? true,
+                          (log.restOfferProbability == nil) == (log.restOffered == nil),
+                          log.restOfferProbability.map({ $0 > 0 && $0 < 1 }) ?? true,
                           log.rir.map({ $0.isFinite && (0...6).contains($0) }) ?? true else {
                         throw BackupError.invalid("This backup contains invalid or duplicate sets.")
                     }
@@ -281,6 +295,10 @@ struct ExportImport {
                     let log = ExerciseLog(dayExercise: de, setIdx: duplicateIndices ? index + 1 : value.setIdx,
                         actualWeight: value.actualWeight,
                         reps: value.reps, rir: value.rir, timestamp: value.timestamp)
+                    log.restOfferProbability = value.restOfferProbability
+                    log.restOffered = value.restOffered
+                    log.restExtended = value.restExtended
+                    log.restFollowUp = value.restFollowUp
                     context.insert(log)
                     if !de.logs.contains(where: { $0 === log }) { de.logs.append(log) }
                 }
