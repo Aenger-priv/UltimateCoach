@@ -77,6 +77,10 @@ final class ExerciseLog {
     var actualWeight: Double?
     var reps: Int
     var rir: Double?
+    var restOfferProbability: Double?
+    var restOffered: Bool?
+    var restExtended: Bool?
+    var restFollowUp: Bool?
     var timestamp: Date
 
     init(dayExercise: DayExercise,

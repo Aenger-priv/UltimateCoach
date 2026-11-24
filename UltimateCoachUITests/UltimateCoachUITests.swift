@@ -4,6 +4,24 @@ final class UltimateCoachUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
     @MainActor
+    func testAdaptiveRestOfferCanBeUsedOnceAndOrdinaryControlRemainsAvailable() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--rest-offer", "-adaptive_rest", "YES"]
+        app.launch()
+        let resume = app.buttons["Resume workout"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 8))
+        resume.tap()
+        XCTAssertTrue(app.buttons["Suggested: add 30 seconds"].exists)
+        app.buttons["Log next set"].tap()
+        let offer = app.buttons["Suggested: add 30 seconds"]
+        XCTAssertTrue(offer.waitForExistence(timeout: 5))
+        offer.tap()
+        XCTAssertTrue(app.buttons["Add 30 seconds"].waitForExistence(timeout: 5))
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Add 30 seconds"].isHittable)
+    }
+
+    @MainActor
     func testOnboardingLoggingResumeAndHistory() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
@@ -53,6 +71,7 @@ final class UltimateCoachUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Finished"].waitForExistence(timeout: 5))
         app.tabBars.buttons["Progress"].tap()
         let benchTrend = app.buttons["exerciseTrend_Bench Press_barbell"]
+        for _ in 0..<4 where !benchTrend.isHittable { app.swipeUp() }
         XCTAssertTrue(benchTrend.waitForExistence(timeout: 5))
         benchTrend.tap()
         let metric = app.buttons["exerciseTrendMetric"]
@@ -64,8 +83,10 @@ final class UltimateCoachUITests: XCTestCase {
         app.buttons["Estimated 1-rep max"].tap()
         XCTAssertEqual(metric.value as? String, "Estimated 1-rep max")
         app.navigationBars.buttons["Progress"].tap()
+        let history = app.buttons["historyWorkout_1_1"]
+        for _ in 0..<4 where !history.isHittable { app.swipeUp() }
         XCTAssertTrue(app.staticTexts["Workout history"].waitForExistence(timeout: 5))
-        app.buttons["historyWorkout_1_1"].tap()
+        history.tap()
         let viewSets = app.buttons["exerciseAction_0"]
         for _ in 0..<3 where !viewSets.isHittable { app.swipeUp() }
         viewSets.tap()
@@ -76,6 +97,62 @@ final class UltimateCoachUITests: XCTestCase {
         XCTAssertEqual(app.buttons["saveSet"].label, "Save changes")
         app.buttons["saveSet"].tap()
         XCTAssertTrue(app.buttons["Edit set 1"].isHittable)
+    }
+
+    @MainActor
+    func testCycleDashboardShowsAttendancePerformanceAndRowingComparison() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--cycle-progress"]
+        app.launch()
+        app.tabBars.buttons["Progress"].tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "2 of 52 workouts finished"))
+            .firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "1 of 4 finished"))
+            .firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "8 → 9 reps at 50 kg"))
+            .firstMatch.exists)
+        capture("Cycle dashboard", app: app)
+        let details = app.buttons["cycleDetails"]
+        for _ in 0..<5 where !details.isHittable { app.swipeUp() }
+        details.tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "4 of 68"))
+            .firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["15-minute row"].exists)
+        for _ in 0..<5 where !app.staticTexts["Choose the next emphasis"].isHittable { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["Choose the next emphasis"].isHittable)
+    }
+
+    @MainActor
+    func testCycleDetailsAreReachableAtLargestText() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--cycle-progress", "-UIPreferredContentSizeCategoryName",
+                               "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        app.tabBars.buttons["Progress"].tap()
+        capture("Cycle dashboard at largest text", app: app)
+        let details = app.buttons["cycleDetails"]
+        for _ in 0..<8 where !details.isHittable { app.swipeUp() }
+        XCTAssertTrue(details.isHittable)
+        details.tap()
+        XCTAssertTrue(app.navigationBars["Cycle details"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testSetUpTimedRowWithoutConnectingAMonitor() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        let today = app.buttons["Use Today"]
+        for _ in 0..<4 where !today.isHittable { app.swipeUp() }
+        today.tap()
+        app.buttons["Open workout"].tap()
+        let setup = app.buttons["Set up RowErg"]
+        for _ in 0..<12 where !setup.isHittable { app.swipeUp() }
+        setup.tap()
+        XCTAssertTrue(app.buttons["Find a PM5"].waitForExistence(timeout: 5))
+        app.buttons["Set up manually"].tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "single time"))
+            .firstMatch.exists)
     }
 
     @MainActor

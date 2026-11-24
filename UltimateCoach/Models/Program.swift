@@ -57,6 +57,13 @@ final class DayPlan {
     var skippedAt: Date?
     var restUntil: Date?
 
+    var hasRestSuggestion: Bool {
+        guard let log = latestLoggedSet else { return false }
+        return log.restOffered == true && log.restExtended != true
+    }
+    var latestLoggedSet: ExerciseLog? {
+        exercises.flatMap(\.logs).max { $0.timestamp < $1.timestamp }
+    }
     var loggedSets: Int { exercises.reduce(0) { $0 + $1.logs.count } }
     var plannedSets: Int { exercises.reduce(0) { $0 + $1.sets } }
     var isDeload: Bool { weekIdx == program.deloadWeek }

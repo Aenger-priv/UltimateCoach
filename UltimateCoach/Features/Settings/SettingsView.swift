@@ -3,6 +3,7 @@ import SwiftData
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
+    @AppStorage("adaptive_rest") private var adaptiveRest = false
     @Environment(\.modelContext) private var context
     @Query private var programs: [Program]
     @AppStorage("units_kg") private var unitsKg = true
@@ -41,6 +42,9 @@ struct SettingsView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section {
+                    Toggle("Adaptive rest suggestions", isOn: $adaptiveRest)
+                    Text("After a hard set, the timer can suggest 30 extra seconds. It learns from your next logged set. Tap to add the time.")
+                        .font(.footnote).foregroundStyle(.secondary)
                     Toggle("Whistle when rest ends", isOn: Binding(get: { restWhistle }, set: setWhistle))
                         .disabled(requestingNotifications)
                     Button("Preview whistle", systemImage: "speaker.wave.2") { RestWhistle.preview() }

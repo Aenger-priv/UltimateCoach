@@ -3,6 +3,9 @@ import SwiftData
 
 struct ProgressScreen: View {
     @Query private var days: [DayPlan]
+    @Query private var programs: [Program]
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var now = Date()
 
     var body: some View {
         NavigationStack {
@@ -10,9 +13,14 @@ struct ProgressScreen: View {
                 let history = days.filter(\.hasResults).sorted {
                     ($0.activityDate ?? .distantPast) > ($1.activityDate ?? .distantPast)
                 }
+                if let program = programs.first(where: { !$0.isArchived }) {
+                    CycleDashboard(program: program, now: now)
+                }
                 if history.isEmpty {
-                    ContentUnavailableView("No workouts logged", systemImage: "chart.line.uptrend.xyaxis",
-                                           description: Text("Your saved sets and conditioning will appear here."))
+                    Section("Workout history") {
+                        Text("Your saved sets and conditioning will appear here.")
+                            .foregroundStyle(CoachStyle.muted)
+                    }
                 } else {
                     let groups = ExerciseTrendGroup.collect(from: history)
                     if !groups.isEmpty {
@@ -43,6 +51,9 @@ struct ProgressScreen: View {
             .scrollContentBackground(.hidden)
             .coachBackground()
             .navigationTitle("Progress")
+            .onAppear { now = .now }
+            .onChange(of: scenePhase) { if scenePhase == .active { now = .now } }
+            .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in now = .now }
         }
     }
 

@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct WorkoutScreen: View {
+    @AppStorage("adaptive_rest") private var adaptiveRest = false
     @Environment(\.modelContext) private var context
     @Environment(\.dynamicTypeSize) private var typeSize
     @AppStorage("units_kg") private var unitsKg = true
@@ -28,8 +29,8 @@ struct WorkoutScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top, spacing: 0) {
             if day.status == .inProgress, selectedExercise == nil, let deadline = day.restUntil {
-                RestTimer(deadline: deadline,
-                          onExtend: { attempt { try WorkoutSession.extendRest(day, context: context) } },
+                RestTimer(deadline: deadline, suggestion: adaptiveRest && day.hasRestSuggestion,
+                          onExtend: { attempt { try WorkoutSession.extendRest(day, context: context, adaptiveRest: adaptiveRest) } },
                           onEnd: { attempt { try WorkoutSession.endRest(day, context: context) } })
             }
         }

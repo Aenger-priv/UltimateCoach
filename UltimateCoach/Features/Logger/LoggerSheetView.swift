@@ -3,6 +3,7 @@ import SwiftData
 
 struct LoggerSheetView: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("adaptive_rest") private var adaptiveRest = false
     @Environment(\.modelContext) private var context
     @Environment(\.locale) private var locale
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -51,7 +52,7 @@ struct LoggerSheetView: View {
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 if exercise.day.status == .inProgress, !weightFocused, let deadline = exercise.day.restUntil {
-                    RestTimer(deadline: deadline, onExtend: extendTimer, onEnd: clearTimer)
+                    RestTimer(deadline: deadline, suggestion: adaptiveRest && exercise.day.hasRestSuggestion, onExtend: extendTimer, onEnd: clearTimer)
                 }
             }
             .safeAreaInset(edge: .bottom) { saveBar }
@@ -85,9 +86,28 @@ struct LoggerSheetView: View {
                 } else {
                     target
                 }
-                if exercise.day.program.track != nil || exercise.day.isDeload {
-                    Text(exercise.day.isDeload ? "Aim for 4 or more reps in reserve" : "Aim for around 2 reps in reserve")
+                if canLog, !exercise.day.isDeload, (exercise.targetWeight ?? 0) > 0 {
+                    let work = WorkoutLogging.liftExposure(for: exercise)
+                    let cue = exercise.logs.isEmpty
+                        ? "Reach the top of the range on every set in two sessions at this load to earn an increase."
+                        : "\(work.topSets) of \(exercise.sets) sets qualify toward a load increase."
+                    Text(cue)
                         .font(.footnote).foregroundStyle(CoachStyle.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !exercise.logs.isEmpty {
+                        ProgressView(value: Double(work.topSets), total: Double(max(1, exercise.sets)))
+                            .tint(CoachStyle.accent)
+                            .accessibilityHidden(true)
+                    }
+                }
+                if exercise.day.isDeload {
+                    Text("Aim for 4 or more reps in reserve.")
+                        .font(.footnote).foregroundStyle(CoachStyle.muted)
+                } else {
+                    let reserve = exercise.day.program.track == nil && exercise.phase == "STR" ? 1 : 2
+                    Text("Aim for \(reserve) reps in reserve. Skipping the effort rating assumes \(reserve).")
+                        .font(.footnote).foregroundStyle(CoachStyle.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .coachCard()
@@ -100,6 +120,10 @@ struct LoggerSheetView: View {
                     if let target = nextTarget {
                         Text("Next target · \(target.repMin)–\(target.repMax) reps" +
                              (target.weight.map { " · " + WeightUnit.formatted($0, useKilograms: unitsKg) } ?? ""))
+                        if let note = WorkoutLogging.nextTargetNote(after: exercise) {
+                            Text(note).font(.footnote).foregroundStyle(CoachStyle.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
                 .coachCard()
@@ -271,7 +295,7 @@ struct LoggerSheetView: View {
     }
 
     private func extendTimer() {
-        do { try WorkoutSession.extendRest(exercise.day, context: context) }
+        do { try WorkoutSession.extendRest(exercise.day, context: context, adaptiveRest: adaptiveRest) }
         catch { errorMessage = error.localizedDescription }
     }
 
@@ -302,7 +326,7 @@ struct LoggerSheetView: View {
                 scrollTarget = "savedSets"
             } else {
                 let saved = try WorkoutLogging.logSet(exercise: exercise, kilograms: kg, reps: reps,
-                    rir: recordEffort ? rir : nil, barbellIncrement: barbellInc, dumbbellIncrement: dbInc, context: context)
+                    rir: recordEffort ? rir : nil, barbellIncrement: barbellInc, dumbbellIncrement: dbInc, context: context, adaptiveRest: adaptiveRest)
                 lastSaved = saved
                 nextTarget = saved.nextTarget
             }

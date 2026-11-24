@@ -25,6 +25,8 @@ struct ProgramScreen: View {
                                  ? "\(program.trainingWeeks) training weeks"
                                  : "\(program.trainingWeeks) training weeks + deload")
                                 .foregroundStyle(CoachStyle.muted)
+                            CycleCompletionBar(workouts: .init(program: program, now: now))
+                                .padding(.top, 4)
                         }
                         .padding(.vertical, 7)
                         Picker("Training week", selection: Binding(
